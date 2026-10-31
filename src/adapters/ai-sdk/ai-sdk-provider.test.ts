@@ -306,6 +306,50 @@ describe('aiSdkProvider', () => {
     expect(plain.model.doStreamCalls[0]!.providerOptions).toBeUndefined()
   })
 
+  it('F20 AC-001 merges the app provider options over the vendor reasoning options per key', async () => {
+    const { port, model } = setup([[...text('x'), finish()]], {
+      vendor: 'openai',
+      reasoning: 'high',
+      callSettings: {
+        providerOptions: { openai: { user: 'u', reasoningEffort: 'low' }, custom: { a: 1 } },
+      },
+    })
+    await run(port)
+    expect(model.doStreamCalls[0]!.providerOptions).toEqual({
+      openai: { reasoningEffort: 'low', parallelToolCalls: true, user: 'u' },
+      custom: { a: 1 },
+    })
+  })
+
+  it('F20 AC-002 sends the app headers', async () => {
+    const { port, model } = setup([[...text('x'), finish()]], {
+      callSettings: { headers: { 'x-a': '1' } },
+    })
+    await run(port)
+    expect(model.doStreamCalls[0]!.headers).toMatchObject({ 'x-a': '1' })
+  })
+
+  it('F20 AC-003 sends the top-level AI SDK reasoning setting', async () => {
+    const { port, model } = setup([[...text('x'), finish()]], {
+      callSettings: { reasoning: 'none' },
+    })
+    await run(port)
+    expect(model.doStreamCalls[0]!.reasoning).toBe('none')
+  })
+
+  it('F20 AC-004 leaves the call unchanged without call settings', async () => {
+    const plain = setup([[...text('x'), finish()]])
+    await run(plain.port)
+    const empty = setup([[...text('x'), finish()]], { callSettings: { providerOptions: {} } })
+    await run(empty.port)
+    for (const call of [plain.model.doStreamCalls[0]!, empty.model.doStreamCalls[0]!]) {
+      expect(call.providerOptions).toBeUndefined()
+      expect(call.headers ?? {}).not.toHaveProperty('x-a')
+      expect(call.reasoning).not.toBe('none')
+    }
+    expect(empty.model.doStreamCalls[0]!.reasoning).toBe(plain.model.doStreamCalls[0]!.reasoning)
+  })
+
   it('AC-012 and AC-016 normalize messages for the vendor', async () => {
     const { port, model } = setup([[...text('x'), finish()]], {
       vendor: 'anthropic',

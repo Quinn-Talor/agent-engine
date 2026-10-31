@@ -1066,6 +1066,7 @@ interface ModelResponse {
 | 重试 | 建连阶段沿用 SDK `maxRetries`：默认 2 次，指数退避，起点 2 秒，遵守 60 秒以内的 retry-after，只对 408/409/429/5xx 重试。流中途失败且还没收到任何内容时，可重试的错误再试一次。每次尝试写入 `attempts` |
 | 错误分类 | 剥开 `NoOutputGeneratedError` 后，归类为 `MODEL_TIMEOUT`、`MODEL_CONNECTION`、`RATE_LIMITED`（可重试，计入熔断）、`AUTH_FAILED`、`CONTEXT_TOO_LONG`（按 `context_overflow` 处理）、`CONTENT_FILTER`、`MODEL_ERROR` |
 | reasoning 参数 | Anthropic：thinking 预算 2048 / 4096 / 8192；OpenAI：`reasoningEffort`，并开启 `parallelToolCalls`；Google：`thinkingConfig`，关闭时为 0；Ollama：`think`。强制开启 thinking 的模型，只有用户选择关闭时才注入关闭参数。SDK 会过滤的厂商私有参数在 fetch 层注入 |
+| 应用调用参数 | 应用为模型声明的 `callSettings`：`providerOptions` 按厂商键与上面的 reasoning 参数逐字段合并，同一字段应用优先；`headers` 与 AI SDK 的顶层 `reasoning` 原样传入。参数随模型配置固定 |
 | 消息规整 | `systemAfterUser=false` 的厂商：把 user 之后的 system 消息改写成带固定标记的 user 内容。清洗泄漏的工具调用标记 |
 | 推理回放 | 推理内容和签名原样带回；某个模型不能稳定接受带签名的回放时，适配器可以配置为丢弃历史推理内容 |
 | 工具选择 | 只在兜底交付时用 `toolChoice = 'none'`，工具定义照常传入；厂商不支持时忽略返回的工具调用 |

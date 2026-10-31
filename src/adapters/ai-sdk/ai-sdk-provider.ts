@@ -40,6 +40,28 @@ export interface AiSdkModelConfig {
   reasoning?: ReasoningLevel
   /** 某个模型不能稳定接受带签名的推理回放时丢弃历史推理。 */
   dropReasoningHistory?: boolean
+  /**
+   * 应用为该模型声明、每次调用都带上的参数（设计 §8.1）：`providerOptions` 按厂商键与引擎生成的
+   * 推理参数逐字段合并，同一字段应用优先；`headers` 与 AI SDK 的顶层 `reasoning` 原样传入。
+   */
+  callSettings?: {
+    providerOptions?: Record<string, Record<string, unknown>>
+    headers?: Record<string, string>
+    reasoning?: Parameters<typeof streamText>[0]['reasoning']
+  }
+}
+
+type ProviderOptions = Record<string, Record<string, unknown>>
+
+/** 按厂商键合并：`extra` 的字段覆盖 `base` 同一厂商键下的同名字段。 */
+function mergeProviderOptions(
+  base: ProviderOptions | undefined,
+  extra: ProviderOptions | undefined,
+): ProviderOptions | undefined {
+  if (!extra || Object.keys(extra).length === 0) return base
+  const result: ProviderOptions = { ...base }
+  for (const [key, fields] of Object.entries(extra)) result[key] = { ...result[key], ...fields }
+  return result
 }
 
 const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error))
@@ -60,7 +82,11 @@ function createPort(
 ): ModelPort {
   const capabilities: ModelCapabilities = { ...DEFAULT_CAPABILITIES, ...config.capabilities }
   const vendor = config.vendor ?? 'other'
-  const providerOptions = reasoningOptions(vendor, config.reasoning)
+  const callSettings = config.callSettings ?? {}
+  const providerOptions = mergeProviderOptions(
+    reasoningOptions(vendor, config.reasoning),
+    callSettings.providerOptions,
+  )
   // 请求没写输出上限时，用应用声明的上限：不写的话 OpenAI 兼容接口按服务端默认值（常见 4K）截断。
   // 没声明就不发，免得默认值截断推理模型的思考。
   const declaredMaxOutput = config.capabilities.maxOutputTokens
@@ -125,6 +151,8 @@ function createPort(
             providerOptions: providerOptions as Parameters<typeof streamText>[0]['providerOptions'],
           }
         : {}),
+      ...(callSettings.headers ? { headers: callSettings.headers } : {}),
+      ...(callSettings.reasoning !== undefined ? { reasoning: callSettings.reasoning } : {}),
       ...(maxOutputTokens !== undefined ? { maxOutputTokens } : {}),
       stopWhen: stepCountIs(1),
       maxRetries: opts.maxRetries,
