@@ -644,10 +644,11 @@ interface Prepared {
     exposure?: 'deferred' | 'eager'          // 默认 deferred
     connectTimeoutMs?: number                // 默认 3 秒
     callTimeoutMs?: number
+    errorClass?: Record<string, 'deterministic' | 'transient'>   // 键为原始工具名，`*` 为缺省
   }
   ```
 
-  MCP 工具的 annotations 映射为副作用类型：`readOnlyHint` → `none`，`idempotentHint` → `idempotent`，其余为 `side_effect`。
+  MCP 工具的 annotations 映射为副作用类型：`readOnlyHint` → `none`，`idempotentHint` → `idempotent`，其余为 `side_effect`。工具返回 `isError` 时记为 `TOOL_EXCEPTION`；协议不区分错误类别，缺省按瞬时处理（同样的输入允许再试一次）。应用可以用 `errorClass` 声明类别，声明为 `deterministic` 的失败第一次就被封路。
 - **插件**：Claude Code 格式的插件由格式解析器拆开，用在哪、启用哪些由应用决定：
 
   | 插件内容 | 解析成 | 交给 |

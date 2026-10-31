@@ -102,6 +102,44 @@ describe('mcp', () => {
     expect(await prepared.tools[0]!.execute({}, ctx)).toMatchObject({ message: 'MCP 工具返回错误' })
   })
 
+  it('F21 AC-001 marks a tool error with the class declared for that tool', async () => {
+    const { prepared } = await prepare({ ...crm, errorClass: { send: 'deterministic' } })
+    const send = prepared.tools.find((t) => t.name === 'crm__send')!
+    expect(await send.execute({}, ctx)).toEqual({
+      __agent_error: true,
+      code: 'TOOL_EXCEPTION',
+      message: '发送失败\n[image]',
+      errorClass: 'deterministic',
+    })
+  })
+
+  it('F21 AC-002 lets a tool override the default class', async () => {
+    const failing = (name: string): FakeMcpTool => ({
+      name,
+      handler: () => ({ content: [{ type: 'text', text: `${name} 失败` }], isError: true }),
+    })
+    const { prepared } = await prepare(
+      { ...crm, errorClass: { '*': 'deterministic', send: 'transient' } },
+      [failing('send'), failing('x')],
+    )
+    const [send, x] = prepared.tools
+    expect(await send!.execute({}, ctx)).toMatchObject({ errorClass: 'transient' })
+    expect(await x!.execute({}, ctx)).toMatchObject({ errorClass: 'deterministic' })
+  })
+
+  it('F21 AC-003 leaves results unchanged without a declared class', async () => {
+    const { prepared } = await prepare({ ...crm, errorClass: { other: 'deterministic' } })
+    const [lookup, , send] = prepared.tools
+    expect(await lookup!.execute({}, ctx)).toBe('客户 A\n等级 VIP')
+    const out = await send!.execute({}, ctx)
+    expect(out).toEqual({
+      __agent_error: true,
+      code: 'TOOL_EXCEPTION',
+      message: '发送失败\n[image]',
+    })
+    expect(out).not.toHaveProperty('errorClass')
+  })
+
   it('keeps tools written with draft-07 definitions or conditional schemas', async () => {
     const tools: FakeMcpTool[] = [
       {

@@ -94,9 +94,12 @@ function compiles(schema: Schema): boolean {
   }
 }
 
-function mapResult(r: McpCallResult): unknown {
+function mapResult(r: McpCallResult, errorClass?: 'deterministic' | 'transient'): unknown {
   const text = r.content.map((c) => (c.type === 'text' ? (c.text ?? '') : `[${c.type}]`)).join('\n')
-  if (r.isError) return toolError('TOOL_EXCEPTION', text || 'MCP 工具返回错误')
+  if (r.isError) {
+    const envelope = toolError('TOOL_EXCEPTION', text || 'MCP 工具返回错误')
+    return errorClass ? { ...envelope, errorClass } : envelope
+  }
   if (!text && r.structuredContent !== undefined) return JSON.stringify(r.structuredContent)
   return text
 }
@@ -130,6 +133,7 @@ export function mcp(spec: McpServerSpec): Capability {
         async execute(input, toolCtx) {
           return mapResult(
             await lease.call(t.name, input, { signal: toolCtx.signal, timeoutMs: callTimeoutMs }),
+            spec.errorClass?.[t.name] ?? spec.errorClass?.['*'],
           )
         },
       }))

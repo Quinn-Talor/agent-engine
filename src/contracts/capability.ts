@@ -95,6 +95,11 @@ export interface McpServerSpec {
   /** 默认 3 秒。 */
   connectTimeoutMs?: number
   callTimeoutMs?: number
+  /**
+   * 工具返回 `isError` 时的错误类别：键为服务器上的原始工具名，`*` 为缺省。
+   * 不声明时按 `TOOL_EXCEPTION`（瞬时）处理，同样的输入允许再试一次。
+   */
+  errorClass?: Record<string, 'deterministic' | 'transient'>
 }
 
 // ── MCP 连接端口（patterns P6；适配器在 adapters/mcp-*） ─────────────────
