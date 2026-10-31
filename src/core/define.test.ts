@@ -56,7 +56,11 @@ describe('defineAgent', () => {
   it('AC-009 returns a frozen agent with a fingerprint', () => {
     const agent = defineAgent(valid)
     expect(agent.id).toBe('helper')
-    expect(agent.capabilities).toBe(valid.capabilities)
+    // F19：复制一份再冻结，能力对象本身沿用原引用。
+    expect(agent.capabilities).toEqual(valid.capabilities)
+    expect(agent.capabilities).not.toBe(valid.capabilities)
+    expect(agent.capabilities![0]).toBe(valid.capabilities![0])
+    expect(Object.isFrozen(agent.capabilities)).toBe(true)
     expect(agent.fingerprint).toMatch(/^[0-9a-f]{64}$/)
     expect(Object.isFrozen(agent)).toBe(true)
   })

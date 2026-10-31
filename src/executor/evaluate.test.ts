@@ -351,6 +351,18 @@ describe('createEvaluator', () => {
     })
   })
 
+  it('treats a guard that returns null as having no opinion, even with onError stop', async () => {
+    const s = setup({
+      guards: {
+        environment: [guard('quiet', () => null as unknown as undefined, { onError: 'stop' })],
+      },
+    })
+    const e = evaluatedOf(await s.evaluator.evaluate(answered()))
+    expect(e.opinions[0]).toEqual({ source: 'environment:quiet', mode: 'active', durationMs: 0 })
+    expect(e.verdict).toEqual({ complete: true, sources: ['candidate'] })
+    expect(s.logs).toEqual([])
+  })
+
   it('AC-026 records shadow opinions without letting them decide', async () => {
     const s = setup({
       guards: {

@@ -13,7 +13,8 @@ import type {
 import { toolError, type ToolErrorEnvelope } from '../contracts/errors.js'
 import type { RunEventBody } from '../contracts/events.js'
 import type { ToolCallView } from '../contracts/tool.js'
-import { callComponent } from './call-component.js'
+import { permitResultIssue } from '../core/component-results.js'
+import { callComponent, failureDetail } from './call-component.js'
 
 /** 审批串行排队（设计 §3.14）。 */
 export class Mutex {
@@ -77,13 +78,16 @@ export async function checkPermission(
     const outcome = await callComponent(() => rule.permit(call, deps.run, ctx), {
       clock: deps.clock,
       timeoutMs: deps.componentTimeoutMs,
+      validate: permitResultIssue,
     })
+    // 出错与返回值不合格同样处理（设计 §4.4）：拒绝，按规则没能判断的暂时性故障报。
     let verdict: PermitResult
     if (outcome.ok) {
       verdict = outcome.value
     } else {
       const reason = `权限规则 ${rule.id} 出错`
-      ctx.log('warn', reason, { error: String(outcome.error), timedOut: outcome.timedOut })
+      const why = outcome.invalid ? `：返回值不合格：${outcome.invalid.issue}` : ''
+      ctx.log('warn', `${reason}${why}`, failureDetail(outcome))
       verdict = { deny: reason, unavailable: true }
     }
     const shadow = rule.mode === 'shadow'

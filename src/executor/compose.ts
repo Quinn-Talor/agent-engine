@@ -5,11 +5,12 @@ import type { Clock, LogLevel, ModelMessage, Segment } from '../contracts/common
 import type { MemoryState, MemoryView, RunInfo, ToolboxState } from '../contracts/component.js'
 import type { BlobRef, RunEventBody } from '../contracts/events.js'
 import type { ModelInput } from '../contracts/model.js'
+import { visibleToolsIssue } from '../core/component-results.js'
 import { estimateMessages, estimateTools } from '../core/estimate.js'
 import { canonicalJson, hashOf } from '../core/hash.js'
 import { layout, segmentToMessage } from '../core/layout.js'
 import type { RunState } from '../core/state.js'
-import { callComponent } from './call-component.js'
+import { callComponent, failureDetail } from './call-component.js'
 import { BlobCache, preview, recallView, renderTranscript, stepEvents } from './compose-view.js'
 import { toModelTool, type PreparedTool } from './tools.js'
 
@@ -79,10 +80,12 @@ export function createComposer(deps: ComposeDeps): Composer {
     }
     const outcome = await callComponent(
       () => Promise.resolve(exposure.visible({ step, prepared, calls })),
-      { clock: deps.clock, timeoutMs: deps.componentTimeoutMs },
+      { clock: deps.clock, timeoutMs: deps.componentTimeoutMs, validate: visibleToolsIssue },
     )
+    // 出错与返回值不合格（设计 §4.4）：退回全部可见。
     if (!outcome.ok) {
-      deps.log('warn', '工具呈现出错，退回全部可见', { error: String(outcome.error) })
+      const why = outcome.invalid ? `返回值不合格：${outcome.invalid.issue}；` : '出错，'
+      deps.log('warn', `工具呈现${why}退回全部可见`, failureDetail(outcome))
       return all
     }
     const chosen = new Set(outcome.value)

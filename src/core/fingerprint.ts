@@ -77,7 +77,8 @@ export function taskFingerprint(def: TaskDef): string {
   })
 }
 
-function isNoticeProvider(n: unknown): n is NoticeProvider {
+/** 须知项是生成器（有 provide 方法），否则是固定片段。 */
+export function isNoticeProvider(n: unknown): n is NoticeProvider {
   return typeof (n as { provide?: unknown }).provide === 'function'
 }
 

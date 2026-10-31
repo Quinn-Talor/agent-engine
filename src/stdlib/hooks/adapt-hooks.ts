@@ -83,7 +83,12 @@ function runHook(
   }
   return ctx.record(
     `hook:${spec.event}`,
-    () => ctx.host<HookRunner>('hook').run(spec, input, workspace ? { cwd: workspace } : {}),
+    () =>
+      // 运行取消时 hook 进程随之终止，不等超时（设计 §3.1）。
+      ctx.host<HookRunner>('hook').run(spec, input, {
+        ...(workspace ? { cwd: workspace } : {}),
+        ...(ctx.signal ? { signal: ctx.signal } : {}),
+      }),
     { kind: 'hook' },
   )
 }

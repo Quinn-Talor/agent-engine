@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { isAbortError } from '../contracts/errors.js'
 import { FakeClock } from '../testing/fake-clock.js'
-import { callComponent } from './call-component.js'
+import { callComponent, failureDetail } from './call-component.js'
 
 describe('callComponent', () => {
   it('returns the value and duration', async () => {
@@ -13,6 +13,23 @@ describe('callComponent', () => {
     await clock.tick(20)
     expect(await outcome).toEqual({ ok: true, value: 7, durationMs: 20 })
     expect(clock.pending()).toBe(0)
+  })
+
+  it('turns a value that fails validation into a failure carrying the issue and the value', async () => {
+    const validate = (v: unknown) => (typeof v === 'number' ? undefined : '需要数字')
+    const bad = await callComponent(async () => 'x' as unknown, {
+      clock: new FakeClock(),
+      validate,
+    })
+    expect(bad).toMatchObject({
+      ok: false,
+      timedOut: false,
+      invalid: { issue: '需要数字', value: 'x' },
+    })
+    expect((bad as { error: Error }).error.message).toBe('返回值不合格：需要数字')
+    expect(failureDetail(bad as Extract<typeof bad, { ok: false }>)).toEqual({ value: 'x' })
+    const good = await callComponent(async () => 3 as unknown, { clock: new FakeClock(), validate })
+    expect(good).toEqual({ ok: true, value: 3, durationMs: 0 })
   })
 
   it('captures thrown errors', async () => {

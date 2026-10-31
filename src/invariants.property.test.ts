@@ -248,7 +248,7 @@ describe('invariant properties', () => {
         cover(events)
         const label = `seed ${seed} run ${r.runId}`
         expect(events.at(-1)?.t, label).toBe('run_ended')
-        expect(checkInvariants(events), label).toEqual([])
+        expect(checkInvariants(events, { complete: true }), label).toEqual([])
         expect(strictReplay(events).violations, label).toEqual([])
         if (r.runId === run.runId) {
           // 被封住的调用从未执行（AC-045）。

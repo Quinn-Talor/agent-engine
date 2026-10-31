@@ -10,33 +10,69 @@ import type { ToolDef } from '../../contracts/tool.js'
 const isZod = (schema: unknown): schema is ZodType =>
   typeof (schema as { safeParse?: unknown }).safeParse === 'function'
 
+/** 输入 schema 的 JSON 形式；zod schema 转不过去时（例如 z.date()）报出是哪个工具。 */
+function jsonSchemaOf(def: ToolDef): unknown {
+  if (!isZod(def.inputSchema)) return def.inputSchema
+  try {
+    return z.toJSONSchema(def.inputSchema)
+  } catch (error) {
+    throw new Error(
+      `工具 ${def.name} 的 schema 不能转成 JSON Schema：${(error as Error).message}`,
+      {
+        cause: error,
+      },
+    )
+  }
+}
+
 /** 能力快照指纹：工具名、描述、schema（设计 §6.4）。 */
 export function toolsFingerprint(defs: readonly ToolDef[]): string {
+  return hashOf(
+    defs.map((d) => ({ name: d.name, description: d.description, schema: jsonSchemaOf(d) })),
+  )
+}
+
+/**
+ * 工具定义哈希（设计 §6.4，Agent 指纹含每项能力的配置哈希）：名称、描述、schema 与执行、安全、语义属性；
+ * 函数不进入哈希，只记是否声明了 `safety.access`。
+ */
+export function toolDefinitionsHash(defs: readonly ToolDef[]): string {
   return hashOf(
     defs.map((d) => ({
       name: d.name,
       description: d.description,
-      schema: isZod(d.inputSchema) ? z.toJSONSchema(d.inputSchema) : d.inputSchema,
+      schema: jsonSchemaOf(d),
+      risk: d.safety?.risk ?? null,
+      access: d.safety?.access !== undefined,
+      execution: {
+        effect: d.execution?.effect ?? null,
+        exclusive: d.execution?.exclusive ?? null,
+        timeoutMs: d.execution?.timeoutMs ?? null,
+        maxOutputChars: d.execution?.maxOutputChars ?? null,
+      },
+      semantics: d.semantics ?? null,
     })),
   )
 }
 
+/**
+ * 工具定义在创建时复制一份并算好哈希（I14）：之后改动传入的数组不影响能力与 Agent 指纹；
+ * schema 转不成 JSON Schema 的工具在这里就报错，不等到运行时才让整项能力不可用。
+ */
 export function tools(
   defs: ToolDef[],
   opts: { id?: string; description?: Segment[]; exposure?: 'eager' | 'deferred' } = {},
 ): Capability {
+  const list = [...defs]
   const exposure = opts.exposure ?? 'eager'
+  const fingerprint = toolsFingerprint(list)
   return {
-    id: opts.id ?? `tools:${defs.map((d) => d.name).join('+')}`,
+    id: opts.id ?? `tools:${list.map((d) => d.name).join('+')}`,
     version: '1',
     kind: 'tool',
-    config: { tools: defs.map((d) => d.name), exposure },
+    config: { tools: list.map((d) => d.name), exposure, definitions: toolDefinitionsHash(list) },
     async prepare() {
-      const prepared: Prepared = {
-        tools: defs,
-        exposure,
-        snapshot: { fingerprint: toolsFingerprint(defs) },
-      }
+      const prepared: Prepared = { tools: list, exposure, snapshot: { fingerprint } }
       if (opts.description) prepared.description = opts.description
       return prepared
     },

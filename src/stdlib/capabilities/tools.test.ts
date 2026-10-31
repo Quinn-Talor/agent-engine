@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import { z } from 'zod'
+import { defineAgent } from '../../api.js'
 import type { Capability } from '../../contracts/capability.js'
+import type { ToolDef } from '../../contracts/tool.js'
 import { fakeTool } from '../../testing/fake-tool.js'
 import { prepareCtx } from './prepare.fixture.js'
-import { bundle, tool, tools, toolsFingerprint } from './tools.js'
+import { bundle, tool, toolDefinitionsHash, tools, toolsFingerprint } from './tools.js'
 
 const search = fakeTool({
   name: 'search',
@@ -11,6 +13,9 @@ const search = fakeTool({
   inputSchema: z.object({ q: z.string() }),
 })
 const fetchTool = fakeTool({ name: 'fetch', description: 'fetch a page' })
+const instructions = [
+  { role: 'system' as const, parts: [{ type: 'text' as const, text: '你是助手' }] },
+]
 
 describe('tool and tools', () => {
   it('AC-001 wraps a single tool', async () => {
@@ -39,11 +44,61 @@ describe('tool and tools', () => {
   it('honours an explicit id and a deferred exposure', async () => {
     const cap = tools([fetchTool], { id: 'web', exposure: 'deferred' })
     expect(cap.id).toBe('web')
-    expect(cap.config).toEqual({ tools: ['fetch'], exposure: 'deferred' })
+    expect(cap.config).toEqual({
+      tools: ['fetch'],
+      exposure: 'deferred',
+      definitions: toolDefinitionsHash([fetchTool]),
+    })
     expect((await cap.prepare(prepareCtx())).exposure).toBe('deferred')
     expect((await tool(fetchTool, { exposure: 'deferred' }).prepare(prepareCtx())).exposure).toBe(
       'deferred',
     )
+  })
+})
+
+describe('agent fingerprint and tool definitions', () => {
+  const base: ToolDef = {
+    name: 'q',
+    description: 'find records',
+    inputSchema: z.object({ s: z.string() }),
+    execute: async () => '',
+  }
+  const fingerprintOf = (def: ToolDef) =>
+    defineAgent({ id: 'a', instructions, capabilities: [tools([def])] }).fingerprint
+
+  it('F19 AC-012 changes when any part of a tool definition changes', () => {
+    const variants: ToolDef[] = [
+      { ...base, description: 'DELETE records' },
+      { ...base, inputSchema: z.object({ s: z.number() }) },
+      { ...base, execution: { effect: 'side_effect' } },
+      { ...base, safety: { risk: 'high' } },
+      { ...base, execution: { timeoutMs: 5_000 } },
+      { ...base, semantics: { repeatable: true } },
+      { ...base, safety: { access: () => ({ read: [] }) } },
+    ]
+    const prints = new Set([fingerprintOf(base), ...variants.map(fingerprintOf)])
+    expect(prints.size).toBe(variants.length + 1)
+  })
+
+  it('keeps its own copy of the definitions, so later pushes change neither tools nor hash', async () => {
+    const defs: ToolDef[] = [base]
+    const cap = tools(defs)
+    const config = structuredClone(cap.config)
+    defs.push({ ...base, name: 'extra' })
+    expect(cap.config).toEqual(config)
+    expect((await cap.prepare(prepareCtx())).tools.map((t) => t.name)).toEqual(['q'])
+  })
+
+  it('names the tool whose zod schema cannot become JSON Schema', () => {
+    const dated: ToolDef = { ...base, name: 'when', inputSchema: z.object({ at: z.date() }) }
+    expect(() => tools([base, dated])).toThrow(/^工具 when 的 schema 不能转成 JSON Schema：/)
+  })
+
+  it('F19 AC-012 stays the same for the same definitions', () => {
+    expect(fingerprintOf(base)).toBe(fingerprintOf({ ...base }))
+    const definitions = (cap: Capability) => (cap.config as { definitions: string }).definitions
+    expect(definitions(tool(base))).toMatch(/^[0-9a-f]{64}$/)
+    expect(definitions(tool(base))).toBe(definitions(tools([{ ...base }])))
   })
 })
 

@@ -57,6 +57,19 @@ describe('workspaceSandbox', () => {
     expect(BUILT_IN_SENSITIVE).toContain('~/.ssh')
   })
 
+  it('F19 AC-010 keeps the built-in sensitive list immutable at runtime', async () => {
+    const list = BUILT_IN_SENSITIVE as string[]
+    expect(() => list.push('/tmp/not-sensitive')).toThrow(TypeError)
+    expect(() => {
+      list[0] = '/tmp/replaced'
+    }).toThrow(TypeError)
+    expect(BUILT_IN_SENSITIVE).toContain('~/.ssh')
+    const { permit } = setup()
+    expect(await permit(call({ read: ['~/.ssh/id_rsa'] }))).toEqual({
+      deny: '敏感路径不可访问：~/.ssh/id_rsa',
+    })
+  })
+
   it('AC-012 allows calls that declare no paths', async () => {
     const { permit, records } = setup()
     expect(await permit(call())).toBe('allow')

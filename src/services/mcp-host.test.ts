@@ -44,6 +44,32 @@ function setup(
 }
 
 describe('createMcpHost', () => {
+  it('F19 AC-015 gives up waiting for a connection when the caller is cancelled', async () => {
+    const { clock, fake, host } = setup({ connectDelayMs: 1000 })
+    const controller = new AbortController()
+    const waiting = host.acquire(spec(), { vault, signal: controller.signal })
+    await flush()
+    controller.abort()
+    await expect(waiting).rejects.toThrow('MCP 取连接已取消')
+
+    // 共享的建连照常完成，其他调用方可以用。
+    const other = host.acquire(spec(), opts())
+    await clock.tick(1000)
+    const lease = await other
+    expect(lease.tools.map((t) => t.name)).toEqual(['lookup'])
+    expect(fake.connects).toHaveLength(1)
+  })
+
+  it('F19 AC-015 fails at once when the caller is already cancelled', async () => {
+    const { fake, host } = setup()
+    const controller = new AbortController()
+    controller.abort()
+    await expect(host.acquire(spec(), { vault, signal: controller.signal })).rejects.toThrow(
+      'MCP 取连接已取消',
+    )
+    expect(fake.connects).toHaveLength(0)
+  })
+
   it('AC-003 reuses one connection per spec fingerprint', async () => {
     const { host, fake } = setup()
     expect(host.kind).toBe('mcp')

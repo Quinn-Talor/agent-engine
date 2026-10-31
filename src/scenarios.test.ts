@@ -4,6 +4,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   FakeClock,
+  assertInvariants,
   completionReview,
   createEngine,
   defineAgent,
@@ -118,6 +119,7 @@ describe('scenarios', () => {
       defineTask({ input: [userText('帮我订 4 月 3 日去东京的机票')] }),
     )
     const asked = await runToEnd(first)
+    assertInvariants(asked.events)
     expect(asked.result).toMatchObject({
       status: 'awaiting_input',
       code: 'ask_user',
@@ -136,6 +138,7 @@ describe('scenarios', () => {
     const second = await runToEnd(
       env.start(agent, defineTask({ input: [userText('靠窗')], history })),
     )
+    assertInvariants(second.events)
     expect(second.result).toMatchObject({
       status: 'completed',
       code: 'finish',
@@ -180,6 +183,7 @@ describe('scenarios', () => {
       .environment({ name: 'background', principal: { reachable: false } })
       .start(agent, defineTask({ input: [userText('生成今天的日报')], guards: [stall] }))
     const { result, events } = await runToEnd(run)
+    assertInvariants(events)
 
     expect(result).toMatchObject({
       status: 'finalized',
@@ -225,6 +229,7 @@ describe('scenarios', () => {
       })
       .start(agent, defineTask({ input: [userText('帮我订一张明天的机票')] }))
     const { result, events } = await runToEnd(run)
+    assertInvariants(events)
 
     expect(result).toMatchObject({ status: 'stopped', code: 'blocked' })
     expect(events.find((e) => e.t === 'delivery_checked')).toMatchObject({
@@ -270,6 +275,7 @@ describe('scenarios', () => {
     ])
     const events = await readAll(archive, crashed.runId)
     expect(events.at(-1)).toMatchObject({ t: 'run_ended', result: { code: 'interrupted' } })
+    assertInvariants(events)
     const brief = retrospect.brief(retrospective(events))
     expect(brief).toContain('write {"path":"日报.md"}（可能已执行）')
 
@@ -286,6 +292,7 @@ describe('scenarios', () => {
           defineTask({ input: [userText(brief), userText('继续')], history }),
         ),
     )
+    assertInvariants(resumed.events)
     expect(resumed.result).toMatchObject({
       status: 'completed',
       text: '已核实 日报.md 已写入，今天的日报完成。',

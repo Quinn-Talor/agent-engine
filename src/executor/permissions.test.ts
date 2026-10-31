@@ -212,6 +212,25 @@ describe('checkPermission', () => {
     expect(logs).toEqual(['权限规则 broken 出错'])
   })
 
+  it('denies a malformed result as a temporary failure instead of crashing', async () => {
+    const malformed = [undefined, 'deny', {}, { deny: 1 }, { ask: { summary: 's' } }]
+    for (const value of malformed) {
+      logs.length = 0
+      const result = await checkPermission(
+        call,
+        deps({ rules: [rule('odd', async () => value as unknown as PermitResult)] }),
+      )
+      expect(result).toMatchObject({
+        allowed: false,
+        error: { code: 'PERMISSION_UNAVAILABLE', message: '权限拒绝：权限规则 odd 出错' },
+      })
+      expect(result.events).toEqual([
+        expect.objectContaining({ verdict: { deny: '权限规则 odd 出错', unavailable: true } }),
+      ])
+      expect(logs[0]).toMatch(/^权限规则 odd 出错：返回值不合格：/)
+    }
+  })
+
   it('keeps a real denial deterministic when another rule could not decide', async () => {
     const result = await checkPermission(
       call,

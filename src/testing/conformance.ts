@@ -4,7 +4,7 @@
 // 记忆的样本覆盖压缩触发线上下（设计 §11，默认 0.8）与超出窗口；副模型替身返回固定摘要，让记忆真的压缩。
 
 import assert from 'node:assert/strict'
-import { canonicalJson } from '../api.js'
+import { canonicalJson, guardOpinionIssue, permitResultIssue } from '../api.js'
 import type { ModelMessage } from '../contracts/common.js'
 import type {
   Candidate,
@@ -291,55 +291,17 @@ function callSamples(): ToolCallView[] {
 // ── 形状校验 ───────────────────────────────────────────────────
 
 const isString = (v: unknown): v is string => typeof v === 'string'
-const isObject = (v: unknown): v is Record<string, unknown> =>
-  typeof v === 'object' && v !== null && !Array.isArray(v)
 
-function assertBlock(b: unknown, label: string) {
-  assert.ok(
-    isObject(b) &&
-      isString(b.tool) &&
-      isString(b.inputHash) &&
-      isString(b.code) &&
-      isString(b.reason) &&
-      (b.suggest === undefined || isString(b.suggest)),
-    `${label}：封路需要 tool、inputHash、code、reason：${canonicalJson(b)}`,
-  )
-}
-
+// 守卫意见与权限结果按引擎运行时的同一套规则检查（core/component-results.ts），两边不会走样。
 function assertGuardOpinion(o: GuardOpinion | undefined, label: string) {
   if (o === undefined) return
-  assert.ok(isObject(o), `${label}：意见必须是对象`)
-  const { detail, ...rest } = o as GuardOpinion & Record<string, unknown>
-  assert.ok(detail === undefined || isString(detail), `${label}：detail 必须是字符串`)
-  const keys = Object.keys(rest)
-  assert.equal(keys.length, 1, `${label}：意见只能是告知、等待输入或终止之一：${canonicalJson(o)}`)
-  if ('warn' in rest && isObject(rest.warn)) {
-    const { problem, suggest, block } = rest.warn
-    assert.ok(isString(problem) && problem.length > 0, `${label}：告知需要 problem`)
-    assert.ok(suggest === undefined || isString(suggest), `${label}：suggest 必须是字符串`)
-    assert.ok(block === undefined || Array.isArray(block), `${label}：block 必须是数组`)
-    for (const b of block ?? []) assertBlock(b, label)
-  } else if ('awaitInput' in rest && isObject(rest.awaitInput)) {
-    assert.ok(isString(rest.awaitInput.code), `${label}：awaitInput 需要 code`)
-  } else if ('end' in rest && isObject(rest.end)) {
-    assert.ok(
-      (rest.end.as === 'finalize' || rest.end.as === 'stop') && isString(rest.end.code),
-      `${label}：end 需要 as（finalize 或 stop）与 code`,
-    )
-  } else {
-    assert.fail(`${label}：未知的意见：${canonicalJson(o)}`)
-  }
+  const issue = guardOpinionIssue(o)
+  assert.ok(issue === undefined, `${label}：${issue}：${canonicalJson(o)}`)
 }
 
 function assertPermit(r: PermitResult, label: string) {
-  if (r === 'allow') return
-  if (isObject(r) && 'deny' in r && isString(r.deny)) return
-  if (isObject(r) && 'ask' in r && isObject(r.ask)) {
-    assert.ok(isString(r.ask.summary), `${label}：ask 需要 summary`)
-    assert.ok(r.ask.risk === 'low' || r.ask.risk === 'high', `${label}：risk 只能是 low 或 high`)
-    return
-  }
-  assert.fail(`${label}：权限结果只能是 allow、deny 或 ask：${canonicalJson(r)}`)
+  const issue = permitResultIssue(r)
+  assert.ok(issue === undefined, `${label}：${issue}：${canonicalJson(r)}`)
 }
 
 /** 每个工具调用后紧跟一条 tool 消息，含全部结果；每个结果都有对应的调用。 */

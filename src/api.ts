@@ -58,6 +58,7 @@ export type { BudgetState, SourcedOpinion } from './core/decide.js'
 export { checkInvariants } from './core/invariants.js'
 export type { InvariantViolation } from './core/invariants.js'
 export { REDACTED, redactText, redactValue } from './core/redact.js'
+export { guardOpinionIssue, permitResultIssue } from './core/component-results.js'
 export { upcastEvent } from './core/upcast.js'
 export {
   buildCorpus,

@@ -475,6 +475,7 @@ interface RunResult {
 
 - **退回前先看预算**（与 ⑥ 合并后的检查一致）：没有下一步可用时不再退回——步数用完或只剩收尾预留时，文本交付转兜底路径（code `max_steps` / `timeout`），结构化交付停止；token 或费用用完时停止（`budget`）。
 - **取消**：交付中途取消时，剩下的验收和兜底都不再执行，也不发出 `delivered`，运行以 `aborted` 结束；因取消而出错的验收不算通过。
+- **截止时间到**：不算取消，照样交付；被截止时间中断（或之后才开始）的验收不算通过，记为未解决（`截止时间到，验收没有完成`）进入 `quality`，不再退回。
 
 **兜底路径**
 
@@ -1564,7 +1565,7 @@ MCP 工具在引擎里叫 `<服务器名>__<工具名>`，交给 hook 匹配和�
 ### 12.2 装配示例
 
 ```ts
-const plugins = enabledPluginDirs.map(parsePlugin)
+const plugins = await Promise.all(enabledPluginDirs.map(parsePlugin))
 const hooks = adaptHooks(plugins.flatMap(p => p.hooks))
 
 const engine = createEngine({
@@ -1620,7 +1621,7 @@ Agent 和任务的定义见 §4.7。
 |---|---|
 | `FakeModel` / `FakeTool` / `FakeClock` / `FakeMcpServer` | 用脚本模拟模型、工具、时间和 MCP 服务器，可以注入延迟、错误、截断、超时、断连 |
 | `runToEnd`、`replay(archive, runId, mode)` | 跑完一次运行，返回结果和收到的事件（`run_ended` 写不进去时事件里没有它）；按严格或回归方式重放 |
-| `assertInvariants(events)` | 检查 I1–I16，所有引擎测试自动调用 |
+| `assertInvariants(events)` | 检查能从单个运行的日志判断的不变量：I1、I2、I4–I7、I9–I11、I13–I16（I10 用严格重放）。I3、I8、I12 只看单个运行的日志判断不了，分别由组装时的前缀复核、`ctx.callModel` 作为调用模型的唯一入口、发起子运行时的检查保证，并由属性测试覆盖 |
 | `conformance.*` | 每类组件的一致性测试：`guard`、`memory`、`exposure`、`check`、`permission`；记忆的用例覆盖压缩触发线以上的样本（`trigger` 可配置），检查成对、任务输入不变、触发线以下不丢消息 |
 | `archiveStoreContract(store)` | 存储的契约测试，内存实现和 SQLite 实现都必须通过；包括未结束的运行能被查询到 |
 | `chaos(engine)` | 故障注入：模型 5xx 与超时（超时走模型库真实的计时器，可传 `clock`）、MCP 断连、hook 超时、存储写失败（含 blob） |

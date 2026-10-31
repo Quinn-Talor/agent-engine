@@ -204,6 +204,18 @@ describe('adaptHooks', () => {
     expect(a.inputs[0]).toMatchObject({ session_id: 'r1', cwd: process.cwd() })
   })
 
+  it('F19 AC-015 passes the run signal to the hook runner', async () => {
+    const [guard] = adaptHooks(specs).permissions
+    const s = setup(ok())
+    const controller = new AbortController()
+    const ctx = { ...s.ctx, signal: controller.signal } as ComponentCtx
+    await guard!.permit(call('Bash'), run(), ctx)
+    expect(vi.mocked(s.runner.run).mock.calls[0]![2]).toMatchObject({
+      cwd: '/ws',
+      signal: controller.signal,
+    })
+  })
+
   it('AC-006 maps PreToolUse outcomes to permissions', async () => {
     const [guard] = adaptHooks(specs).permissions
     const permit = (reply: HookResult, toolName = 'Bash') => {

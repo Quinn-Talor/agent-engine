@@ -63,6 +63,28 @@ describe('redactValue', () => {
     })
   })
 
+  it('copies id arrays, so freezing the result leaves the caller free to keep appending', () => {
+    const childRunIds = ['run_1', 'run_2']
+    const out = Object.freeze(redactValue({ childRunIds }).childRunIds)
+    expect(out).toEqual(['run_1', 'run_2'])
+    expect(out).not.toBe(childRunIds)
+    childRunIds.push('run_3')
+    expect(out).toEqual(['run_1', 'run_2'])
+  })
+
+  it('freezes every object and array it builds when asked, leaving the input and class instances alone', () => {
+    const bytes = new Uint8Array([1])
+    const input = { a: [{ b: 'sk-abcdefgh1234' }], childRunIds: ['r1', 'r2'], bytes }
+    const out = redactValue(input, [], { freeze: true })
+    expect(out).toEqual({ a: [{ b: REDACTED }], childRunIds: ['r1', 'r2'], bytes })
+    for (const v of [out, out.a, out.a[0], out.childRunIds]) expect(Object.isFrozen(v)).toBe(true)
+    expect(out.bytes).toBe(bytes)
+    expect(
+      Object.isFrozen(input) || Object.isFrozen(input.a) || Object.isFrozen(input.childRunIds),
+    ).toBe(false)
+    expect(Object.isFrozen(redactValue({ a: [1] }))).toBe(false)
+  })
+
   it('returns non-string primitives unchanged', () => {
     expect(redactValue(42)).toBe(42)
     expect(redactValue(null)).toBeNull()

@@ -7,6 +7,7 @@ import type { Guard } from '../contracts/component.js'
 import { DefinitionError } from '../contracts/errors.js'
 import type { Task, TaskDef } from '../contracts/task.js'
 import { agentFingerprint, taskFingerprint } from './fingerprint.js'
+import { freezeList, frozenCopy } from './freeze.js'
 import { canonicalJson } from './hash.js'
 
 const AGENT_ID = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/
@@ -199,8 +200,21 @@ export function defineAgent(def: AgentDef): Agent {
     }
   }
   if (issues.length > 0) throw new DefinitionError('invalid_agent', issues)
-  return Object.freeze({ ...def, fingerprint })
+  // 复制一份再冻结（I14）：之后改动传入的数组不影响 Agent；能力等组件对象本身不冻结。
+  return Object.freeze({
+    ...def,
+    instructions: frozenCopy(def.instructions),
+    ...(def.capabilities ? { capabilities: freezeList(def.capabilities) } : {}),
+    ...(def.toolbox ? { toolbox: Object.freeze({ ...def.toolbox }) } : {}),
+    ...(def.deliverable ? { deliverable: frozenDeliverable(def.deliverable) } : {}),
+    ...(def.model ? { model: frozenCopy(def.model) } : {}),
+    fingerprint,
+  })
 }
+
+/** 交付物：外层复制后冻结，验收列表冻结一层；输出契约与兜底是组件，原样保留。 */
+const frozenDeliverable = (d: Deliverable): Deliverable =>
+  Object.freeze({ ...d, ...(d.checks ? { checks: freezeList(d.checks) } : {}) })
 
 function checkHistory(history: ModelMessage[], issues: Issues): void {
   let pending = new Set<string>()
@@ -336,5 +350,18 @@ export function defineTask(def: TaskDef): Task {
     }
   }
   if (issues.length > 0) throw new DefinitionError('invalid_task', issues)
-  return Object.freeze({ ...def, fingerprint })
+  // 复制一份再冻结（I14）：数据逐层冻结，守卫列表冻结一层。
+  return Object.freeze({
+    ...def,
+    input: frozenCopy(def.input),
+    ...(def.history ? { history: frozenCopy(def.history) } : {}),
+    ...(def.volatile ? { volatile: frozenCopy(def.volatile) } : {}),
+    ...(def.scope ? { scope: frozenCopy(def.scope) } : {}),
+    ...(def.context ? { context: frozenCopy(def.context) } : {}),
+    ...(def.deliverable ? { deliverable: frozenDeliverable(def.deliverable) } : {}),
+    ...(def.guards ? { guards: freezeList(def.guards) } : {}),
+    ...(def.budget ? { budget: frozenCopy(def.budget) } : {}),
+    ...(def.tags ? { tags: frozenCopy(def.tags) } : {}),
+    fingerprint,
+  })
 }

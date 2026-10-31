@@ -77,6 +77,27 @@ interface Entry {
 
 const isSecret = (v: string | SecretRef): v is SecretRef => typeof v !== 'string'
 
+const acquireCancelled = () => new Error('MCP 取连接已取消')
+
+/** 等待与取消竞速（设计 §3.1）：取消时本次等待立即失败，被等待的操作（共享的建连）照常进行。 */
+function untilAborted<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) return Promise.reject(acquireCancelled())
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(acquireCancelled())
+    signal.addEventListener('abort', onAbort, { once: true })
+    promise.then(
+      (value) => {
+        signal.removeEventListener('abort', onAbort)
+        resolve(value)
+      },
+      (error: unknown) => {
+        signal.removeEventListener('abort', onAbort)
+        reject(error instanceof Error ? error : new Error(String(error)))
+      },
+    )
+  })
+}
+
 /** 凭据库只解析引用名；带模板时由这里把 `${<secret>}` 换成凭据值。 */
 async function resolveSecret(ref: SecretRef, vault: SecretResolver): Promise<string> {
   const value = await vault.resolve({ secret: ref.secret })
@@ -289,14 +310,15 @@ export function createMcpHost(opts: {
 
   const host: McpHost = {
     kind: 'mcp',
-    async acquire(spec, { vault }) {
+    async acquire(spec, { vault, signal }) {
       if (closing) throw new Error('MCP 连接池已关闭')
+      if (signal.aborted) throw acquireCancelled()
       const entry = entryOf(spec)
       if (entry.breaker.cooling()) throw new Error(`MCP 服务器 ${spec.name} 熔断中`)
       // 每次获取都经调用方的凭据库解析，运行的脱敏器由此记下凭据值。
-      const server = await resolveServer(spec, vault)
+      const server = await untilAborted(resolveServer(spec, vault), signal)
       const target: Target = { server, secrets: hashOf(server) }
-      const live = await liveOf(entry, target, true)
+      const live = await untilAborted(liveOf(entry, target, true), signal)
       return {
         tools: live.tools,
         version: live.version,

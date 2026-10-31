@@ -3,6 +3,7 @@
 import type { Clock, ModelMessage } from '../contracts/common.js'
 import type { MemoryState, MemoryView } from '../contracts/component.js'
 import type { BlobRef, RunEvent, RunEventBody } from '../contracts/events.js'
+import { memoryViewIssue } from '../core/component-results.js'
 import { canonicalJson } from '../core/hash.js'
 import { transcriptMessages } from '../core/projections.js'
 import { apply, type RunState } from '../core/state.js'
@@ -152,12 +153,19 @@ export async function recallView(
     messages: [...memoryState.history, ...memoryState.transcript].map((m) => canonicalJson(m)),
     history: memoryState.history.length,
   }
+  // 形状不合格与出错一样沿用完整视图；拆开成对、改写记录仍按设计 §4.4 让运行失败。
   const outcome = await callComponent(() => memory.recall(memoryState), {
     clock: opts.clock,
     timeoutMs: opts.timeoutMs ?? MEMORY_TIMEOUT_MS,
+    validate: memoryViewIssue,
   })
   if (!outcome.ok) {
-    opts.log?.(`记忆出错，沿用完整视图：${outcome.timedOut ? '超时' : String(outcome.error)}`)
+    const why = outcome.invalid
+      ? `返回值不合格：${outcome.invalid.issue}`
+      : outcome.timedOut
+        ? '超时'
+        : String(outcome.error)
+    opts.log?.(`记忆出错，沿用完整视图：${why}`)
     return { history: [...memoryState.history], transcript: [...memoryState.transcript] }
   }
   const violations = checkPairs([...outcome.value.history, ...outcome.value.transcript])

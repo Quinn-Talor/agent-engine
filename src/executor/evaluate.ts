@@ -17,11 +17,12 @@ import type {
 import type { BlobRef, RunEventBody } from '../contracts/events.js'
 import type { ModelPrice } from '../contracts/model.js'
 import { budgetGuard } from '../core/budget-guard.js'
+import { guardOpinionIssue } from '../core/component-results.js'
 import { budgetState, decide, type SourcedOpinion } from '../core/decide.js'
 import { stepFacts } from '../core/facts.js'
 import type { RunState, SourcedIntervention } from '../core/state.js'
 import { renderFinding, renderSteering } from '../core/steering.js'
-import { callComponent } from './call-component.js'
+import { callComponent, failureDetail } from './call-component.js'
 
 export interface EvaluateDeps {
   run: RunInfo
@@ -111,14 +112,18 @@ export function createEvaluator(deps: EvaluateDeps): Evaluator {
         if (!check) throw new Error(`${source} 启动失败`)
         return check(facts)
       },
-      { clock: deps.clock, timeoutMs: deps.componentTimeoutMs },
+      {
+        clock: deps.clock,
+        timeoutMs: deps.componentTimeoutMs,
+        // 没有意见：undefined，也接受 JS 里常见的 null。
+        validate: (v) => (v === undefined || v === null ? undefined : guardOpinionIssue(v)),
+      },
     )
     const base = { source, mode, durationMs: outcome.durationMs }
+    // 出错与返回值不合格同样处理（设计 §4.4）：本步没有意见；onError 为 stop 时停止。
     if (!outcome.ok) {
-      deps.ctxFor(source).log('warn', `${source} 出错`, {
-        error: String(outcome.error),
-        timedOut: outcome.timedOut,
-      })
+      const why = outcome.invalid ? `返回值不合格：${outcome.invalid.issue}` : '出错'
+      deps.ctxFor(source).log('warn', `${source} ${why}`, failureDetail(outcome))
       return guard.onError === 'stop'
         ? {
             ...base,
@@ -128,7 +133,7 @@ export function createEvaluator(deps: EvaluateDeps): Evaluator {
         : { ...base, error: true }
     }
     const value = outcome.value
-    if (!value) return base
+    if (value === undefined || value === null) return base
     // 委托人联系不上：没有人会回答，等待输入改为收尾，同样先告知。
     const g: GuardOpinion =
       'awaitInput' in value && !deps.run.environment.principalReachable

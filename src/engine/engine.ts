@@ -9,7 +9,8 @@ import type { Environment, EnvironmentConfig } from '../contracts/environment.js
 import { DefinitionError, toolError } from '../contracts/errors.js'
 import type { ArchiveStore, RunEvent } from '../contracts/events.js'
 import type { RunResult, RunSummary } from '../contracts/run.js'
-import { engineFingerprint, environmentFingerprint } from '../core/fingerprint.js'
+import { engineFingerprint, environmentFingerprint, isNoticeProvider } from '../core/fingerprint.js'
+import { freezeList, frozenCopy } from '../core/freeze.js'
 import { foldState } from '../core/projections.js'
 import { apply } from '../core/state.js'
 import { normalizeOutput } from '../executor/exec.js'
@@ -50,7 +51,7 @@ function environmentIssues(config: EnvironmentConfig): string[] {
     ['权限规则', config.permissions ?? []],
     ['守卫', config.guards ?? []],
     ['强制验收', config.checks ?? []],
-    ['须知生成器', (config.notice ?? []).flatMap((n) => ('provide' in n ? [n] : []))],
+    ['须知生成器', (config.notice ?? []).filter(isNoticeProvider)],
   ]
   for (const [label, list] of ids) {
     for (const id of duplicates(list.map((c) => c.id))) issues.push(`${label} id 重复：${id}`)
@@ -156,10 +157,28 @@ async function recoverInterrupted(
   }
 }
 
+/**
+ * 执行环境"长期、不可变"（设计 §1.1、I14）：复制一份再冻结，之后改动传入的配置不影响运行。
+ * 数据（须知片段、上限）逐层冻结；组件列表冻结一层；委托人的审批方与各组件对象原样保留。
+ */
+export function freezeEnvironment(config: EnvironmentConfig): EnvironmentConfig {
+  const notice = config.notice?.map((item) => (isNoticeProvider(item) ? item : frozenCopy(item)))
+  return Object.freeze({
+    ...config,
+    principal: Object.freeze({ ...config.principal }),
+    ...(notice ? { notice: freezeList(notice) } : {}),
+    ...(config.permissions ? { permissions: freezeList(config.permissions) } : {}),
+    ...(config.guards ? { guards: freezeList(config.guards) } : {}),
+    ...(config.checks ? { checks: freezeList(config.checks) } : {}),
+    ...(config.caps ? { caps: frozenCopy(config.caps) } : {}),
+  })
+}
+
 export function assembleEngine(config: EngineConfig, defaults: EngineDefaults): Engine {
   const { services } = config
   const memory = config.memory ?? defaults.memory
-  const guards = config.guards ?? defaults.guards
+  // 复制一份再冻结（I14）：之后改动传入的守卫列表不影响引擎。
+  const guards = freezeList(config.guards ?? defaults.guards)
   // 总带 skill 宿主和委托调度（设计 §2）；传入的宿主加在后面，同一种类的替换默认的。
   // 只传了 MCP 连接池时，skill 与委托不会因此悄悄失效。
   const given = services.hosts ?? []
@@ -210,7 +229,8 @@ export function assembleEngine(config: EngineConfig, defaults: EngineDefaults): 
 
   return {
     fingerprint,
-    environment(envConfig) {
+    environment(envInput) {
+      const envConfig = freezeEnvironment(envInput)
       const envIssues = environmentIssues(envConfig)
       if (envIssues.length > 0) throw new DefinitionError('invalid_environment', envIssues)
       const envFingerprint = environmentFingerprint(envConfig)

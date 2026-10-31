@@ -47,7 +47,8 @@ export function placeExternalCalls(stage: RunEventBody[], calls: RunEventBody[])
 export function secretKeeper(vault?: Vault): {
   vault: SecretResolver
   redact(text: string): string
-  redactValue<T>(value: T): T
+  /** `freeze`：脱敏的同时冻结（写日志的事件用）。 */
+  redactValue<T>(value: T, opts?: { freeze?: boolean }): T
 } {
   const secrets: string[] = []
   return {
@@ -60,7 +61,7 @@ export function secretKeeper(vault?: Vault): {
       },
     },
     redact: (text) => redactText(text, secrets),
-    redactValue: (value) => redactValue(value, secrets),
+    redactValue: (value, opts) => redactValue(value, secrets, opts),
   }
 }
 
@@ -95,6 +96,7 @@ export function createRunContext(deps: RunContextDeps): RunContext {
   const create = (source: string): ComponentCtx => ({
     clock,
     random,
+    signal: deps.signal,
     async callModel(req) {
       // 运行取消后不再发起新的模型调用（设计 §3.14）。
       if (deps.signal.aborted) throw abortError()

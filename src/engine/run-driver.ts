@@ -31,6 +31,7 @@ import type { Notice, Run, RunResult, RunStatus, RunSubscriber } from '../contra
 import type { Task } from '../contracts/task.js'
 import type { ToolCtx } from '../contracts/tool.js'
 import { runCost } from '../core/facts.js'
+import { copyData } from '../core/freeze.js'
 import { canonicalJson } from '../core/hash.js'
 import { checkInvariants } from '../core/invariants.js'
 import { layout } from '../core/layout.js'
@@ -298,7 +299,10 @@ export function startRun(
       let at = events.at(-1)?.at ?? -Infinity
       const stamped = bodies.map((body, i) => {
         at = Math.max(clock.now(), at)
-        return keeper.redactValue({ ...body, seq: state.lastSeq + 1 + i, at } as RunEvent)
+        // 脱敏时一并冻结，再写档案、推给订阅者：订阅者改不了运行（设计 §4.4）。
+        return keeper.redactValue({ ...body, seq: state.lastSeq + 1 + i, at } as RunEvent, {
+          freeze: true,
+        })
       })
       const next = stamped.reduce(apply, state)
       await archive.append(runId, stamped)
@@ -927,7 +931,8 @@ export function startRun(
     const quality = qualityOf(events)
     const price = admitted?.price
     const cost = price ? runCost(state, price) : state.childCost > 0 ? state.childCost : undefined
-    return {
+    // 交给调用方的是普通的可变副本：状态里的值来自冻结的日志事件，不随输出契约有没有 schema 而不同。
+    return copyData({
       runId,
       status: o.status,
       ...(o.code !== undefined ? { code: o.code } : {}),
@@ -941,7 +946,7 @@ export function startRun(
       ...(cost !== undefined ? { cost } : {}),
       steps: state.step,
       toolCalls: state.toolCallCount,
-    }
+    })
   }
 
   /** 工具结果没能写进日志（例如存储暂时失败）时补上 TOOL_MISSING_RESULT，保证调用都有结果（I2）。 */

@@ -62,6 +62,14 @@ describe('assertInvariants', () => {
       /不变量违规：\n- I2（seq \d+）工具调用 c1 没有结果/,
     )
   })
+
+  it('F19 AC-013 runs the complete checks', async () => {
+    const { events } = await runToEnd(testHarness({ replies: twoSteps }).start())
+    const ghost = events.map((e) =>
+      e.t === 'context_built' ? { ...e, tools: [...e.tools, 'ghost'] } : e,
+    )
+    expect(() => assertInvariants(ghost)).toThrow(/- I4（seq \d+）/)
+  })
 })
 
 describe('replay', () => {

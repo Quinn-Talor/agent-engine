@@ -46,18 +46,30 @@ const STRUCTURAL_KEYS = new Set([
 const isIds = (v: unknown): boolean =>
   typeof v === 'string' || (Array.isArray(v) && v.every((x) => typeof x === 'string'))
 
-export function redactValue<T>(value: T, secrets: readonly string[] = []): T {
-  if (typeof value === 'string') {
-    return (BLOB_REF.test(value) ? value : redactText(value, secrets)) as T
+/**
+ * 结果不与传入值共用对象和数组（id 数组也复制），冻结结果不会冻住调用方还在用的数组。
+ * `freeze` 时新建的对象与数组随建随冻结：写日志前一次遍历完成脱敏与冻结。类实例、二进制数据原样保留。
+ */
+export function redactValue<T>(
+  value: T,
+  secrets: readonly string[] = [],
+  opts: { freeze?: boolean } = {},
+): T {
+  const seal = <V extends object>(v: V): V => (opts.freeze ? Object.freeze(v) : v)
+  const walk = (v: unknown): unknown => {
+    if (typeof v === 'string') return BLOB_REF.test(v) ? v : redactText(v, secrets)
+    if (Array.isArray(v)) return seal(v.map((x) => walk(x)))
+    if (typeof v === 'object' && v !== null && isPlainObject(v)) {
+      return seal(
+        Object.fromEntries(
+          Object.entries(v).map(([k, x]) => [
+            k,
+            STRUCTURAL_KEYS.has(k) && isIds(x) ? (Array.isArray(x) ? seal([...x]) : x) : walk(x),
+          ]),
+        ),
+      )
+    }
+    return v
   }
-  if (Array.isArray(value)) return value.map((v) => redactValue(v, secrets)) as T
-  if (typeof value === 'object' && value !== null && isPlainObject(value)) {
-    return Object.fromEntries(
-      Object.entries(value).map(([k, v]) => [
-        k,
-        STRUCTURAL_KEYS.has(k) && isIds(v) ? v : redactValue(v, secrets),
-      ]),
-    ) as T
-  }
-  return value
+  return walk(value) as T
 }

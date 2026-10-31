@@ -51,6 +51,8 @@ export interface ComponentCtx {
   log(level: LogLevel, message: string, detail?: unknown): void
   /** 取得能力宿主，例如 hook 执行器；宿主不存在时抛错（方案 D12）。 */
   host<T>(kind: string): T
+  /** 所属运行的取消信号：取消随时生效（设计 §3.1），交给 hook 等外部执行（F19 新增，可选）。 */
+  signal?: AbortSignal
 }
 
 // ── 工具呈现（§9.2） ────────────────────────────────────────────

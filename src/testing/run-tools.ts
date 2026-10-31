@@ -28,7 +28,7 @@ export async function runToEnd(run: Run): Promise<{ result: RunResult; events: R
 }
 
 export function assertInvariants(events: readonly RunEvent[]): void {
-  const violations = checkInvariants(events)
+  const violations = checkInvariants(events, { complete: true })
   if (violations.length === 0) return
   const lines = violations.map((v) => `- ${v.invariant}（seq ${v.seq ?? '-'}）${v.message}`)
   throw new Error(`不变量违规：\n${lines.join('\n')}`)

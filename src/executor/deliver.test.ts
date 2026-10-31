@@ -561,6 +561,30 @@ describe('deliver — abort', () => {
     expect(s.notices).toEqual([])
   })
 
+  it('records gates interrupted by the deadline as unresolved, not passed', async () => {
+    const controller = new AbortController()
+    const hung = check('A', 'gate', () => new Promise<never>(() => {}))
+    const later = check('B', 'gate', true)
+    const s = setup(
+      { checks: [hung, later] },
+      // 到截止时间：信号已触发，但不算取消，照样交付。
+      { signal: controller.signal, cancelled: () => false },
+    )
+    const pending = s.delivery.deliver(completed('答案'))
+    await s.clock.tick(10)
+    controller.abort()
+    const unresolved = { pass: false, issues: ['截止时间到，验收没有完成'] }
+    expect(checked(await pending)).toMatchObject({
+      outcome: 'delivered',
+      checks: [
+        { source: 'check:A', ...unresolved },
+        { source: 'check:B', ...unresolved },
+      ],
+    })
+    expect(later.seen).toHaveLength(0)
+    expect(s.notices).toEqual([{ t: 'delivered', text: '答案' }])
+  })
+
   it('ends a hung gate as soon as the run is aborted', async () => {
     const controller = new AbortController()
     const hung = check('A', 'gate', () => new Promise<never>(() => {}))

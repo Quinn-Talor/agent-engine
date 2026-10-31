@@ -70,6 +70,12 @@ function setup(
 }
 
 describe('createRunContext', () => {
+  it('F19 AC-015 gives components the run signal', () => {
+    const controller = new AbortController()
+    const { context } = setup({ patch: { signal: controller.signal } })
+    expect(context.ctxFor('guard:x').signal).toBe(controller.signal)
+  })
+
   it('AC-011 records a side model call and returns text, usage and model', async () => {
     const { context, blobs, main } = setup()
     const ctx = context.ctxFor('memory:compacting')

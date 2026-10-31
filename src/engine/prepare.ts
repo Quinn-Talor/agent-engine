@@ -14,8 +14,10 @@ import type {
 import { toolError } from '../contracts/errors.js'
 import type { BlobRef, RunEventBody } from '../contracts/events.js'
 import type { ToolDef } from '../contracts/tool.js'
+import { noticeResultIssue } from '../core/component-results.js'
+import { isNoticeProvider } from '../core/fingerprint.js'
 import { canonicalJson, hashOf } from '../core/hash.js'
-import { callComponent } from '../executor/call-component.js'
+import { callComponent, failureDetail } from '../executor/call-component.js'
 import { prepareTool, type PreparedTool } from '../executor/tools.js'
 
 const PREPARE_TIMEOUT_MS = 30_000
@@ -62,9 +64,6 @@ type Source = Pick<Capability, 'id' | 'kind' | 'version' | 'prepare'> & {
   system?: boolean
   fromOutput?: boolean
 }
-
-const isProvider = (n: Segment | NoticeProvider): n is NoticeProvider =>
-  typeof (n as NoticeProvider).provide === 'function'
 
 /** 输出契约与工具呈现自带的系统工具，作为两项内置能力参与准备。 */
 function systemSource(
@@ -266,17 +265,19 @@ export async function prepareRun(input: PrepareInput): Promise<PrepareResult> {
   }
 
   for (const item of input.notice) {
-    if (!isProvider(item)) {
+    if (!isNoticeProvider(item)) {
       prepared.notice.push(item)
       continue
     }
     const startedAt = clock.now()
     const outcome = await callComponent(
       () => item.provide(run, input.ctxFor(`provider:${item.id}`)),
-      { clock, timeoutMs: PREPARE_TIMEOUT_MS, signal },
+      { clock, timeoutMs: PREPARE_TIMEOUT_MS, signal, validate: noticeResultIssue },
     )
+    // 出错与返回值不合格（设计 §4.4）：跳过这条须知。
     if (!outcome.ok) {
-      input.log('warn', `须知 ${item.id} 生成失败`, { error: String(outcome.error) })
+      const why = outcome.invalid ? `返回值不合格：${outcome.invalid.issue}` : '生成失败'
+      input.log('warn', `须知 ${item.id} ${why}`, failureDetail(outcome))
       continue
     }
     // 拦截不是须知：不写入运行记录，后面的须知也不再执行。

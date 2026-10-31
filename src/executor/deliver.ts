@@ -16,14 +16,17 @@ import type {
 import type { RunEventBody } from '../contracts/events.js'
 import type { ModelInput, ModelPrice } from '../contracts/model.js'
 import type { Notice } from '../contracts/run.js'
+import { checkResultIssue } from '../core/component-results.js'
 import { budgetState } from '../core/decide.js'
 import { estimateMessages, estimateTools } from '../core/estimate.js'
+import { copyData } from '../core/freeze.js'
 import type { RunState } from '../core/state.js'
-import { callComponent } from './call-component.js'
+import { callComponent, failureDetail } from './call-component.js'
 
 const DEFAULT_MAX_REPAIRS = 3
 const DEFAULT_MAX_ATTEMPTS = 1
 const MIN_LEVEL1_MS = 1000
+const DEADLINE_ISSUE = '截止时间到，验收没有完成'
 
 export interface DeliverDeps {
   run: RunInfo
@@ -90,11 +93,12 @@ export function createDelivery(deps: DeliverDeps): Delivery {
   /** 正常路径因预算转兜底时的 code；delivery_checked 的 fallback 本身只表达 empty_output。 */
 
   const aborted = () => (deps.cancelled ? deps.cancelled() : deps.signal?.aborted === true)
-  const call = <T>(fn: () => Promise<T>) =>
+  const call = <T>(fn: () => Promise<T>, validate?: (value: T) => string | undefined) =>
     callComponent(fn, {
       clock,
       timeoutMs: deps.componentTimeoutMs,
       ...(deps.signal ? { signal: deps.signal } : {}),
+      ...(validate ? { validate } : {}),
     })
 
   /**
@@ -137,15 +141,25 @@ export function createDelivery(deps: DeliverDeps): Delivery {
     check: Check,
     candidate: Candidate,
     corpus: Corpus,
-  ): Promise<{ record: CheckRecord; hint?: string }> => {
+  ): Promise<{ record: CheckRecord; hint?: string; interrupted?: true }> => {
     const source = `check:${check.id}`
     const accept = acceptOf(check, source)
     if (!accept) return { record: { source, mode: check.mode, pass: true } }
-    const outcome = await call(() => accept(candidate, corpus))
+    const outcome = await call(() => accept(candidate, corpus), checkResultIssue)
     // 因取消而出错的验收不算通过。
     if (!outcome.ok && aborted()) return { record: { source, mode: check.mode, pass: false } }
+    // 截止时间到被中断的验收没有给出结论：不算通过，记为未解决；已经没有时间退回修改。
+    if (!outcome.ok && !outcome.invalid && deps.signal?.aborted) {
+      deps.ctxFor(source).log('warn', `验收 ${check.id} 被截止时间中断`)
+      return {
+        record: { source, mode: check.mode, pass: false, issues: [DEADLINE_ISSUE] },
+        interrupted: true,
+      }
+    }
+    // 出错与返回值不合格：按设计 §4.4 视为通过，记入诊断日志。
     if (!outcome.ok) {
-      deps.ctxFor(source).log('warn', `验收 ${check.id} 出错`, { error: String(outcome.error) })
+      const why = outcome.invalid ? `返回值不合格：${outcome.invalid.issue}` : '出错'
+      deps.ctxFor(source).log('warn', `验收 ${check.id} ${why}`, failureDetail(outcome))
       return { record: { source, mode: check.mode, pass: true } }
     }
     const result = outcome.value
@@ -184,11 +198,12 @@ export function createDelivery(deps: DeliverDeps): Delivery {
       intent?.kind === 'complete' &&
       output.tools?.some((t) => t.name === intent.tool)
     ) {
+      // 复制一份：intent.input 来自冻结的日志事件，schema 解析结果也可能引用其中的子对象。
       const schema = output.schema
-      if (!schema) candidate.output = intent.input
+      if (!schema) candidate.output = copyData(intent.input)
       else {
         const parsed = schema.safeParse(intent.input)
-        if (parsed.success) candidate.output = parsed.data
+        if (parsed.success) candidate.output = copyData(parsed.data)
         else {
           schemaIssues = (parsed.error?.issues ?? []).map(
             (i) => `${i.path.map(String).join('.') || '(根)'}：${i.message}`,
@@ -264,10 +279,10 @@ export function createDelivery(deps: DeliverDeps): Delivery {
     const corpus = await deps.corpus()
     const records: CheckRecord[] = []
     for (const check of checks.filter((c) => c.mode === 'gate' || c.mode === 'shadow')) {
-      const { record, hint } = await runCheck(check, candidate, corpus)
+      const { record, hint, interrupted } = await runCheck(check, candidate, corpus)
       if (aborted()) return []
       records.push(record)
-      if (check.mode !== 'gate' || record.pass) continue
+      if (check.mode !== 'gate' || record.pass || interrupted) continue
       const used = gateReturns.get(record.source) ?? 0
       if (used < (check.maxAttempts ?? DEFAULT_MAX_ATTEMPTS)) {
         gateReturns.set(record.source, used + 1)

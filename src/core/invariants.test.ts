@@ -169,7 +169,8 @@ describe('checkInvariants', () => {
       stepStarted(3),
       contextBuilt(3),
     ])
-    expect(kinds(events)).toEqual(['trace', 'trace', 'trace'])
+    // F19：缺 run_ended 记为 I1（运行一定会结束）。
+    expect(kinds(events)).toEqual(['trace', 'trace', 'I1'])
   })
 
   it('accepts a run that ended inside a step', () => {
@@ -254,5 +255,80 @@ describe('checkInvariants', () => {
       )
       expect(kinds(shadowOnly)).toEqual(['I16'])
     })
+  })
+})
+
+describe('checkInvariants complete (F19)', () => {
+  const full = (bodies: EventBody[]) =>
+    checkInvariants(sequence(bodies), { complete: true }).map((v) => v.invariant)
+  const failedRun = (patch: Parameters<typeof runEnded>[0]): EventBody[] => [
+    runStarted(),
+    stepStarted(1),
+    contextBuilt(1),
+    modelResponded(1, { text: 'x' }),
+    runEnded(patch),
+  ]
+
+  it('accepts a complete run and a run that failed at admission', () => {
+    expect(full(completeRun())).toEqual([])
+    expect(full([runEnded({ status: 'failed', code: 'admission_timeout' })])).toEqual([])
+  })
+
+  it('AC-013 reports a run without run_ended as I1 in both modes', () => {
+    const bodies = completeRun().slice(0, -1)
+    expect(full(bodies)).toContain('I1')
+    expect(kinds(sequence(bodies))).toContain('I1')
+  })
+
+  it('AC-013 reports a visible tool that was never prepared as I4', () => {
+    const bodies = completeRun().map((b) =>
+      b.t === 'context_built' && b.step === 2 ? { ...b, tools: ['search', 'ghost'] } : b,
+    )
+    expect(full(bodies)).toEqual(['I4'])
+    expect(kinds(sequence(bodies))).toEqual([])
+  })
+
+  it('AC-013 reports a failed tool result without an error code as I5', () => {
+    const bodies = completeRun().map((b) =>
+      b.t === 'tool_finished' && b.callId === 'c2' ? { ...b, isError: true } : b,
+    )
+    expect(full(bodies)).toEqual(['I5'])
+  })
+
+  it('AC-013 reports a completed run whose last delivery was not delivered as I6', () => {
+    const returned = completeRun().map((b) =>
+      b.t === 'delivery_checked' ? deliveryChecked(2, 'returned') : b,
+    )
+    expect(full(returned)).toContain('I6')
+    const none = completeRun().filter((b) => b.t !== 'delivery_checked')
+    expect(full(none)).toContain('I6')
+  })
+
+  it('AC-013 reports a model call after the context limit was reached as I7', () => {
+    const bodies = completeRun().map((b) =>
+      b.t === 'context_built' && b.step === 2 ? contextBuilt(2, 10_000) : b,
+    )
+    // 超限后状态机已进入结束环节，后面的事件同时违反环节顺序（I10）。
+    expect(full(bodies)[0]).toBe('I7')
+  })
+
+  it('AC-013 reports a model_error without a classified code as I9', () => {
+    const unclassified = failedRun({
+      status: 'failed',
+      code: 'model_error',
+      error: { code: 'BOOM' as never, message: 'x', retryable: false },
+    })
+    expect(full(unclassified)).toContain('I9')
+    const classified = failedRun({
+      status: 'failed',
+      code: 'model_error',
+      error: { code: 'MODEL_TIMEOUT', message: 'x', retryable: true },
+    })
+    expect(full(classified)).not.toContain('I9')
+  })
+
+  it('AC-013 reports strict replay violations as I10', () => {
+    const bodies = completeRun().filter((b) => !(b.t === 'context_built' && b.step === 2))
+    expect(full(bodies)).toContain('I10')
   })
 })
