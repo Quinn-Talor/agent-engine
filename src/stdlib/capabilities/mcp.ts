@@ -1,5 +1,6 @@
 // MCP 能力（设计 §4.2）：从连接池取连接，列出工具，按工具列表生成快照；工具名为 `服务器名__工具名`，
-// annotations 映射副作用；默认延后呈现。依赖不可用由失败连击（external_failure）与封路处理。
+// 不符合厂商格式时改用规整名字（调用仍用原名，快照记 renamed）；annotations 映射副作用；默认延后呈现。
+// 依赖不可用由失败连击（external_failure）与封路处理。
 
 import { z } from 'zod'
 import { hashOf, toolError } from '../../api.js'
@@ -15,6 +16,10 @@ import type {
 } from '../../api.js'
 
 const DEFAULT_CALL_TIMEOUT_MS = 30_000
+/** 厂商通用的工具名格式。 */
+const VALID_TOOL_NAME = /^[A-Za-z0-9_-]{1,64}$/
+/** 规整名字：前缀最多 55 个字符 + `_` + 8 位哈希 = 64。 */
+const COMPLIANT_PREFIX_CHARS = 55
 /** 工具超时比 SDK 请求超时多 1 秒，让请求超时先触发并计入熔断。 */
 const TOOL_TIMEOUT_GRACE_MS = 1000
 
@@ -94,6 +99,41 @@ function compiles(schema: Schema): boolean {
   }
 }
 
+/** 不合规的完整名字的替代：非法字符换成 `_`，截断后接原名哈希的前 8 位（稳定、跨能力不撞名）。 */
+function compliantName(fullName: string): string {
+  const prefix = fullName.replace(/[^A-Za-z0-9_-]/g, '_').slice(0, COMPLIANT_PREFIX_CHARS)
+  return `${prefix}_${hashOf(fullName).slice(0, 8)}`
+}
+
+/** 工具名：合规的完整名字原样使用；不合规的规整，能力内与已用名字重复的跳过。 */
+function toolNames(
+  server: string,
+  tools: McpToolInfo[],
+): { names: Map<string, string>; renamed: Record<string, string>; skipped: string[] } {
+  const full = (t: McpToolInfo) => `${server}__${t.name}`
+  const names = new Map<string, string>()
+  const used = new Set<string>()
+  for (const t of tools) {
+    if (!VALID_TOOL_NAME.test(full(t))) continue
+    names.set(t.name, full(t))
+    used.add(full(t))
+  }
+  const renamed: Record<string, string> = {}
+  const skipped: string[] = []
+  for (const t of tools) {
+    if (names.has(t.name)) continue
+    const name = compliantName(full(t))
+    if (used.has(name)) {
+      skipped.push(t.name)
+      continue
+    }
+    names.set(t.name, name)
+    used.add(name)
+    renamed[t.name] = name
+  }
+  return { names, renamed, skipped }
+}
+
 function mapResult(r: McpCallResult, errorClass?: 'deterministic' | 'transient'): unknown {
   const text = r.content.map((c) => (c.type === 'text' ? (c.text ?? '') : `[${c.type}]`)).join('\n')
   if (r.isError) {
@@ -102,6 +142,13 @@ function mapResult(r: McpCallResult, errorClass?: 'deterministic' | 'transient')
   }
   if (!text && r.structuredContent !== undefined) return JSON.stringify(r.structuredContent)
   return text
+}
+
+/** 工具声明的错误类别：先找工具自己的，再找 `*`；只认规格自己的键（工具可能叫 `constructor`）。 */
+function errorClassOf(spec: McpServerSpec, tool: string) {
+  const declared = spec.errorClass ?? {}
+  if (Object.hasOwn(declared, tool)) return declared[tool]
+  return Object.hasOwn(declared, '*') ? declared['*'] : undefined
 }
 
 export function mcp(spec: McpServerSpec): Capability {
@@ -124,16 +171,19 @@ export function mcp(spec: McpServerSpec): Capability {
       const schemas = new Map(listed.map((t) => [t.name, usableSchema(t.inputSchema)]))
       const skipped = listed.filter((t) => !schemas.get(t.name)).map((t) => t.name)
       const relaxed = listed.filter((t) => schemas.get(t.name)?.relaxed).map((t) => t.name)
-      const provided = listed.filter((t) => !skipped.includes(t.name))
+      const schemaOk = listed.filter((t) => !skipped.includes(t.name))
+      const named = toolNames(spec.name, schemaOk)
+      const provided = schemaOk.filter((t) => named.names.has(t.name))
+      const allSkipped = [...skipped, ...named.skipped]
       const tools: ToolDef[] = provided.map((t) => ({
-        name: `${spec.name}__${t.name}`,
+        name: named.names.get(t.name)!,
         description: t.description ?? t.name,
         inputSchema: schemas.get(t.name)!.schema,
         execution: { effect: effectOf(t), timeoutMs: callTimeoutMs + TOOL_TIMEOUT_GRACE_MS },
         async execute(input, toolCtx) {
           return mapResult(
             await lease.call(t.name, input, { signal: toolCtx.signal, timeoutMs: callTimeoutMs }),
-            spec.errorClass?.[t.name] ?? spec.errorClass?.['*'],
+            errorClassOf(spec, t.name),
           )
         },
       }))
@@ -152,8 +202,9 @@ export function mcp(spec: McpServerSpec): Capability {
           detail: {
             server: spec.name,
             version: lease.version,
-            ...(skipped.length > 0 ? { skipped } : {}),
+            ...(allSkipped.length > 0 ? { skipped: allSkipped } : {}),
             ...(relaxed.length > 0 ? { relaxed } : {}),
+            ...(Object.keys(named.renamed).length > 0 ? { renamed: named.renamed } : {}),
           },
         },
         available: lease.available,

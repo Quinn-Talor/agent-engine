@@ -631,7 +631,7 @@ interface Prepared {
 | 自定义 | 实现 `Capability` | 自定义 | 自定义 | 可以注册新的宿主 |
 
 - **同类合并**：多个 skill 共用一个激活工具，多个子 agent 共用一个委托工具。
-- **工具名冲突**：在准备环节报错，运行以 `failed` / `invalid_agent` 结束。不同能力提供同 id 的守卫（来源都是 `capability:<id>`）同样报错；同一个守卫对象被多个能力共享时只算一个。MCP 工具按 `服务器名__工具名` 加前缀。MCP 工具的 schema 编译不过时：draft-07 的 `definitions` 改写成 `$defs` 再试；还不行就去掉条件约束（`if`/`then`/`else`、`not`、`dependent*`）和找不到目标的引用，保留属性和类型（快照里记为 `relaxed`）；仍不行才跳过（记为 `skipped`）。
+- **工具名冲突**：在准备环节报错，运行以 `failed` / `invalid_agent` 结束。不同能力提供同 id 的守卫（来源都是 `capability:<id>`）同样报错；同一个守卫对象被多个能力共享时只算一个。MCP 工具按 `服务器名__工具名` 加前缀；完整名字不符合 `^[A-Za-z0-9_-]{1,64}$` 时改用规整名字（非法字符换成下划线、截到 55 个字符，再接下划线与原名哈希的前 8 位），调用时仍用服务器上的原名，快照记为 `renamed`；规整后在能力内重名的跳过（记为 `skipped`）。MCP 工具的 schema 编译不过时：draft-07 的 `definitions` 改写成 `$defs` 再试；还不行就去掉条件约束（`if`/`then`/`else`、`not`、`dependent*`）和找不到目标的引用，保留属性和类型（快照里记为 `relaxed`）；仍不行才跳过（记为 `skipped`）。
 - **MCP 规格**：
 
   ```ts

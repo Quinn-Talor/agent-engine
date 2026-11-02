@@ -127,6 +127,18 @@ describe('mcp', () => {
     expect(await x!.execute({}, ctx)).toMatchObject({ errorClass: 'deterministic' })
   })
 
+  it('looks up only the keys the spec declares, not inherited object keys', async () => {
+    const { prepared } = await prepare({ ...crm, errorClass: { '*': 'deterministic' } }, [
+      {
+        name: 'constructor',
+        handler: () => ({ content: [{ type: 'text', text: '失败' }], isError: true }),
+      },
+    ])
+    expect(await prepared.tools[0]!.execute({}, ctx)).toMatchObject({
+      errorClass: 'deterministic',
+    })
+  })
+
   it('F21 AC-003 leaves results unchanged without a declared class', async () => {
     const { prepared } = await prepare({ ...crm, errorClass: { other: 'deterministic' } })
     const [lookup, , send] = prepared.tools
@@ -138,6 +150,59 @@ describe('mcp', () => {
       message: '发送失败\n[image]',
     })
     expect(out).not.toHaveProperty('errorClass')
+  })
+
+  it('F22 AC-001 keeps compliant tool names unchanged', async () => {
+    const { prepared } = await prepare(crm, [
+      { name: 'lookup' },
+      { name: 'update-order' },
+      { name: 'send_1' },
+    ])
+    expect(prepared.tools.map((t) => t.name)).toEqual([
+      'crm__lookup',
+      'crm__update-order',
+      'crm__send_1',
+    ])
+    expect(prepared.snapshot.detail).not.toHaveProperty('renamed')
+  })
+
+  it('F22 AC-002 renames a tool with illegal characters and calls it by its original name', async () => {
+    const { prepared, fake } = await prepare(crm, [{ name: 'files.read', handler: () => 'ok' }])
+    const expected = `crm__files_read_${hashOf('crm__files.read').slice(0, 8)}`
+    expect(prepared.tools.map((t) => t.name)).toEqual([expected])
+    expect(expected).toMatch(/^[A-Za-z0-9_-]{1,64}$/)
+    expect(prepared.snapshot.detail).toMatchObject({ renamed: { 'files.read': expected } })
+    expect(await prepared.tools[0]!.execute({ path: 'a' }, ctx)).toBe('ok')
+    expect(fake.calls).toEqual([{ name: 'files.read', args: { path: 'a' } }])
+  })
+
+  it('F22 AC-003 shortens a name longer than 64 characters', async () => {
+    const long = 'a'.repeat(70)
+    const { prepared, fake } = await prepare(crm, [{ name: long }])
+    const name = prepared.tools[0]!.name
+    expect(name).toHaveLength(64)
+    expect(name).toMatch(/^[A-Za-z0-9_-]{1,64}$/)
+    expect(name).toMatch(/_[0-9a-f]{8}$/)
+    await prepared.tools[0]!.execute({}, ctx)
+    expect(fake.calls[0]!.name).toBe(long)
+  })
+
+  it('F22 AC-004 gives distinct, stable names and also cleans the server name', async () => {
+    const tools: FakeMcpTool[] = [{ name: 'a.b' }, { name: 'a:b' }]
+    const first = (await prepare(crm, tools)).prepared.tools.map((t) => t.name)
+    const again = (await prepare(crm, tools)).prepared.tools.map((t) => t.name)
+    expect(first[0]).not.toBe(first[1])
+    expect(again).toEqual(first)
+    const dotted = { ...crm, name: 'my.server' }
+    const { prepared } = await prepare(dotted, [{ name: 'x' }])
+    expect(prepared.tools[0]!.name).toMatch(/^[A-Za-z0-9_-]{1,64}$/)
+  })
+
+  it('F22 AC-005 keeps a compliant name and skips the renamed tool it collides with', async () => {
+    const clash = `a_b_${hashOf('crm__a.b').slice(0, 8)}`
+    const { prepared } = await prepare(crm, [{ name: 'a.b' }, { name: clash }])
+    expect(prepared.tools.map((t) => t.name)).toEqual([`crm__${clash}`])
+    expect(prepared.snapshot.detail).toMatchObject({ skipped: ['a.b'] })
   })
 
   it('keeps tools written with draft-07 definitions or conditional schemas', async () => {
