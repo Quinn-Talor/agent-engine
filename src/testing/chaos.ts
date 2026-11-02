@@ -5,12 +5,8 @@
 // 计时器（走模型库的时钟）或取消；hook 等 `timeoutMs`（走 `clock`，默认系统时钟）或取消。
 
 import { ModelCallError, abortError, seededRandom, systemClock } from '../api.js'
-import type {
-  HookExec,
-  HookExecResult,
-  McpConnect,
-  McpConnection,
-} from '../contracts/capability.js'
+import type { HookExec, HookExecResult } from '../contracts/capability.js'
+import type { McpConnect, McpConnection } from '../contracts/mcp.js'
 import type { Clock } from '../contracts/common.js'
 import type { ArchiveStore } from '../contracts/events.js'
 import type { ModelPort, ModelProvider } from '../contracts/model.js'

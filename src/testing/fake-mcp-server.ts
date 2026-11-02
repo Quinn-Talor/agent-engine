@@ -7,7 +7,7 @@ import type {
   McpConnection,
   McpToolInfo,
   ResolvedMcpServer,
-} from '../contracts/capability.js'
+} from '../contracts/mcp.js'
 import type { Clock, JsonSchema } from '../contracts/common.js'
 
 export interface FakeMcpTool {

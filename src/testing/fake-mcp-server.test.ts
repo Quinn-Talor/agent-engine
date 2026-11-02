@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { ResolvedMcpServer } from '../contracts/capability.js'
+import type { ResolvedMcpServer } from '../contracts/mcp.js'
 import { FakeClock } from './fake-clock.js'
 import { fakeMcpServer } from './fake-mcp-server.js'
 

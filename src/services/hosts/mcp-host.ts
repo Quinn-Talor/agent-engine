@@ -4,15 +4,15 @@
 // 旧连接等进行中的调用结束再关闭；只预连接应用给出的列表；工具列表变化时更新版本。
 // 连接通过端口 McpConnect 建立，stdio / HTTP 适配器由包入口装配（方案 D10）。
 
+import type { CapabilityHost } from '../../contracts/capability.js'
 import type {
-  CapabilityHost,
   McpCallResult,
   McpConnect,
   McpConnection,
   McpServerSpec,
   McpToolInfo,
   ResolvedMcpServer,
-} from '../../contracts/capability.js'
+} from '../../contracts/mcp.js'
 import type { Clock, SecretRef, SecretResolver } from '../../contracts/common.js'
 import type { BreakerStatus } from '../../contracts/engine.js'
 import type { BreakerPolicy } from '../../contracts/model.js'

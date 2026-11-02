@@ -1,6 +1,6 @@
 import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js'
 import { describe, expect, it } from 'vitest'
-import type { McpConnection, McpServerSpec } from '../../contracts/capability.js'
+import type { McpConnection, McpServerSpec } from '../../contracts/mcp.js'
 import type { SecretRef } from '../../contracts/common.js'
 import type { BreakerStatus } from '../../contracts/engine.js'
 import { FakeClock } from '../../testing/fake-clock.js'
