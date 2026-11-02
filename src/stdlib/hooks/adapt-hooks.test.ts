@@ -458,6 +458,58 @@ describe('adaptHooks', () => {
     expect(sub.inputs[0]).toMatchObject({ hook_event_name: 'SubagentStop' })
   })
 
+  it('E9 AC-012 maps the tool name and input through toolView', async () => {
+    const hooks: HookSpec[] = [
+      { event: 'PreToolUse', matcher: 'Write', command: 'guard.sh' },
+      { event: 'PostToolUse', matcher: 'Write', command: 'lint.sh' },
+    ]
+    const toolView = (v: { toolName: string; input: unknown }) => {
+      if (v.toolName !== 'write') return v
+      const { path, ...rest } = v.input as Record<string, unknown>
+      return { toolName: 'Write', input: { ...rest, file_path: path } }
+    }
+    const writeCall = call('write', { path: 'a.txt', content: 'hi' })
+
+    const mapped = adaptHooks(hooks, { toolView })
+    const s = setup(exit(2, ''))
+    expect(await mapped.permissions[0]!.permit(writeCall, run(), s.ctx)).toEqual({
+      deny: 'hook 拒绝了 write',
+    })
+    expect(s.inputs[0]).toMatchObject({
+      tool_name: 'Write',
+      tool_input: { file_path: 'a.txt', content: 'hi' },
+    })
+    expect(s.inputs[0]!.tool_input).not.toHaveProperty('path')
+
+    const g = setup(ok())
+    await mapped.guards[0]!.start(run(), g.ctx).check(
+      obs(1, {
+        toolCalls: [tool({ name: 'write', capability: 'core', inputPreview: '{"path":"a.txt"}' })],
+      }),
+    )
+    expect(g.inputs[0]).toMatchObject({ tool_name: 'Write', tool_input: { file_path: 'a.txt' } })
+
+    const plain = setup(exit(2, ''))
+    expect(await adaptHooks(hooks).permissions[0]!.permit(writeCall, run(), plain.ctx)).toBe(
+      'allow',
+    )
+    expect(plain.inputs).toHaveLength(0)
+
+    const broken = setup(exit(2, ''))
+    const throwing = adaptHooks(hooks, {
+      toolView: () => {
+        throw new Error('bad view')
+      },
+    })
+    expect(
+      await throwing.permissions[0]!.permit(call('Write', { path: 'a' }), run(), broken.ctx),
+    ).toEqual({
+      deny: 'hook 拒绝了 Write',
+    })
+    expect(broken.inputs[0]).toMatchObject({ tool_name: 'Write', tool_input: { path: 'a' } })
+    expect(broken.logs.some((m) => m.includes('hook 工具视图出错'))).toBe(true)
+  })
+
   it('AC-011 records each hook execution as a hook call', async () => {
     const adapted = adaptHooks(specs)
     const s = setup(ok())

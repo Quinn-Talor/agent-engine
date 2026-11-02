@@ -1393,9 +1393,12 @@ interface Approver {
 interface NoticeProvider extends Component {
   provide(run: RunInfo, ctx: ComponentCtx): Promise<Segment[]>
 }
-function adaptHooks(specs: HookSpec[]): {
+function adaptHooks(specs: HookSpec[], opts?: { toolView?: (v: HookToolView) => HookToolView }): {
   notice: NoticeProvider[]; permissions: PermissionRule[]; guards: Guard[]; checks: Check[]
 }
+// 应用可以用 toolView 把工具名与输入映射成 hook 期望的形状（例如 Claude Code 的 Write、file_path）；
+// 映射只影响 matcher 匹配与 hook 输入，拒绝与询问的消息仍用真实工具名；映射出错时按原名执行并记警告。
+interface HookToolView { toolName: string; input: unknown }
 interface HookSpec {
   event: 'SessionStart' | 'UserPromptSubmit' | 'PreToolUse' | 'PostToolUse'
        | 'Stop' | 'SubagentStop' | 'PreCompact' | 'Notification'

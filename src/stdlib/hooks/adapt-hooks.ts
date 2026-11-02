@@ -1,7 +1,8 @@
 // hook 适配（设计 §9.10）：把 Claude Code 格式的 hook 翻译成须知、权限、守卫和强制验收。
 // SessionStart、UserPromptSubmit → 须知（UserPromptSubmit 可以拦下运行）；PreToolUse → 权限；
 // PostToolUse → 成功调用后的"继续 + 提示"；Stop → 根运行的强制验收（gate）；SubagentStop → 子运行的强制验收；
-// PreCompact、Notification 交还应用。MCP 工具按 Claude Code 的命名 `mcp__<服务器>__<工具>` 匹配与上报。
+// PreCompact、Notification 交还应用。MCP 工具按 Claude Code 的命名 `mcp__<服务器>__<工具>` 匹配与上报；
+// 应用可以用 toolView 把工具名与输入映射成 hook 期望的形状（例如 Claude Code 的 `Write`、`file_path`）。
 // 每次执行都经 ctx.record(…, { kind: 'hook' }) 留痕（方案 D12）。
 
 import type {
@@ -42,6 +43,31 @@ function hookToolName(capability: string, name: string): string {
   if (!capability.startsWith('mcp:')) return name
   const server = capability.slice('mcp:'.length)
   return name.startsWith(`${server}__`) ? `mcp__${name}` : `mcp__${server}__${name}`
+}
+
+/** hook 看到的工具名与输入。 */
+export interface HookToolView {
+  toolName: string
+  input: unknown
+}
+
+type ToolView = (view: HookToolView) => HookToolView
+
+/** 经应用的映射得到 hook 看到的视图；映射出错时按原名与原输入执行并记警告。 */
+function viewOf(
+  base: HookToolView,
+  toolView: ToolView | undefined,
+  ctx: ComponentCtx,
+): HookToolView {
+  if (!toolView) return base
+  try {
+    return toolView(base)
+  } catch (error) {
+    ctx.log('warn', 'hook 工具视图出错，按原名执行', {
+      error: error instanceof Error ? error.message : String(error),
+    })
+    return base
+  }
 }
 
 /** matcher 缺省、空或 `*` 匹配全部；否则为锚定正则，不合法时按字面全等。 */
@@ -134,16 +160,20 @@ function noticeProvider(spec: HookSpec, index: number): NoticeProvider {
   }
 }
 
-function permissionRule(spec: HookSpec, index: number): PermissionRule {
+function permissionRule(spec: HookSpec, index: number, toolView?: ToolView): PermissionRule {
   return {
     ...identity(spec, index),
     async permit(call, run, ctx) {
-      const toolName = hookToolName(call.capability, call.toolName)
-      if (!matches(spec.matcher, toolName)) return 'allow'
+      const view = viewOf(
+        { toolName: hookToolName(call.capability, call.toolName), input: call.input },
+        toolView,
+        ctx,
+      )
+      if (!matches(spec.matcher, view.toolName)) return 'allow'
       // 权限规则出错按拒绝处理（设计 §4.4）：进程起不来、超时或被信号结束都拒绝。
       let r: HookResult
       try {
-        r = await runHook(ctx, spec, run, { tool_name: toolName, tool_input: call.input })
+        r = await runHook(ctx, spec, run, { tool_name: view.toolName, tool_input: view.input })
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error)
         return { deny: `hook 执行失败，拒绝 ${call.toolName}：${message}`, unavailable: true }
@@ -178,7 +208,7 @@ function permissionRule(spec: HookSpec, index: number): PermissionRule {
   }
 }
 
-function processGuard(spec: HookSpec, index: number): Guard {
+function processGuard(spec: HookSpec, index: number, toolView?: ToolView): Guard {
   return {
     ...identity(spec, index),
     start: (run, ctx) => ({
@@ -186,11 +216,18 @@ function processGuard(spec: HookSpec, index: number): Guard {
         const hints: string[] = []
         // Claude Code 只在工具成功后触发 PostToolUse。
         for (const call of facts.toolCalls.filter((c) => c.ok)) {
-          const toolName = hookToolName(call.capability, call.name)
-          if (!matches(spec.matcher, toolName)) continue
+          const view = viewOf(
+            {
+              toolName: hookToolName(call.capability, call.name),
+              input: previewValue(call.inputPreview),
+            },
+            toolView,
+            ctx,
+          )
+          if (!matches(spec.matcher, view.toolName)) continue
           const r = await runHook(ctx, spec, run, {
-            tool_name: toolName,
-            tool_input: previewValue(call.inputPreview),
+            tool_name: view.toolName,
+            tool_input: view.input,
             tool_response: previewValue(call.outputPreview),
           })
           if (r.exitCode === 2) hints.push(r.stderr.trim())
@@ -240,7 +277,10 @@ function stopCheck(spec: HookSpec, index: number): Check {
   }
 }
 
-export function adaptHooks(specs: HookSpec[]): {
+export function adaptHooks(
+  specs: HookSpec[],
+  opts: { toolView?: (view: HookToolView) => HookToolView } = {},
+): {
   notice: NoticeProvider[]
   permissions: PermissionRule[]
   guards: Guard[]
@@ -265,10 +305,10 @@ export function adaptHooks(specs: HookSpec[]): {
         adapted.notice.push(noticeProvider(spec, index))
         break
       case 'PreToolUse':
-        adapted.permissions.push(permissionRule(spec, index))
+        adapted.permissions.push(permissionRule(spec, index, opts.toolView))
         break
       case 'PostToolUse':
-        adapted.guards.push(processGuard(spec, index))
+        adapted.guards.push(processGuard(spec, index, opts.toolView))
         break
       case 'Stop':
       case 'SubagentStop':
