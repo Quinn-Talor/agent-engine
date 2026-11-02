@@ -190,6 +190,15 @@ describe('createComposer', () => {
     })
   })
 
+  it('F23 AC-008 keeps the order the exposure gives', async () => {
+    const s = setup({
+      exposure: { visible: () => ['search_tool', 'fetch', 'ghost', 'search', 'fetch'] },
+    })
+    const { visible, input } = await s.composer.compose(fold([runStarted()]))
+    expect([...visible]).toEqual(['search_tool', 'fetch', 'search'])
+    expect(input.tools.map((t) => t.name)).toEqual(['search_tool', 'fetch', 'search'])
+  })
+
   it('AC-006 falls back to all tools when the exposure throws', async () => {
     const s = setup({
       exposure: {

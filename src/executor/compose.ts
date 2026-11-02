@@ -91,7 +91,12 @@ export function createComposer(deps: ComposeDeps): Composer {
     const chosen = new Set(outcome.value)
     const unknown = [...chosen].filter((name) => !deps.toolset.has(name))
     if (unknown.length > 0) deps.log('warn', `工具呈现给出了不存在的工具：${unknown.join(', ')}`)
-    return all.filter((name) => chosen.has(name))
+    // 按呈现方式给出的顺序（去掉不存在的、去重）：新加载的工具追加在末尾，不打碎提示词前缀
+    const ordered: string[] = []
+    for (const name of outcome.value) {
+      if (deps.toolset.has(name) && !ordered.includes(name)) ordered.push(name)
+    }
+    return ordered
   }
 
   return {

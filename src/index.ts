@@ -87,6 +87,9 @@ export type { LangfuseEvent } from './stdlib/observability/langfuse-exporter.js'
 export { intents } from './stdlib/capabilities/intents.js'
 export { planning, progressGuard } from './stdlib/capabilities/planning.js'
 export { searchExposure } from './stdlib/exposure/search-exposure.js'
+export type { SearchExposureOptions } from './stdlib/exposure/search-exposure.js'
+export { bm25Ranker, tokenize } from './stdlib/exposure/tool-ranker.js'
+export type { RankedTool, ToolCandidate, ToolRanker } from './stdlib/exposure/tool-ranker.js'
 export { compactingMemory, cutIndex } from './stdlib/memory/compacting-memory.js'
 
 // 适配器

@@ -1242,7 +1242,9 @@ interface Exposure extends Component {
 
 标准实现 `searchExposure()`：
 - 准备结果为 `deferred` 的工具一开始只露出 `search_tool`；没有延后工具时，`search_tool` 也不露出。
-- 调用 `search_tool` 后，下一步展开全部延后工具。
+- `search_tool({ query, server? })` 用检索器（`ToolRanker`，缺省 `bm25Ranker()`：名字、描述、能力 id，中文按单字与相邻两字切词）打分排序，只加载命中的前 8 个；没有命中时只返回各服务器的工具数，不加载。应用可以经 `searchExposure({ ranker })` 换成自己的检索器，检索器出错时本次改用 BM25。
+- 本次运行内可见集合只增不减：常驻工具 → `search_tool` → 搜到过或调用过的延后工具（按加载先后，新加载的追加在末尾，不打碎提示词前缀）；同时可见的延后工具最多 40 个，超出时淘汰最早加载且未调用的。
+- 延后工具不超过 20 个时直接全部可见，不露出 `search_tool`。`compose` 按呈现方式给出的顺序排列工具。
 - 调用过的延后工具，在本次运行内一直可见。
 
 ### 9.3 记忆 `Memory`
