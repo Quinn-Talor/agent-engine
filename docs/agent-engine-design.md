@@ -1067,7 +1067,7 @@ interface ModelResponse {
 | 重试 | 建连阶段沿用 SDK `maxRetries`：默认 2 次，指数退避，起点 2 秒，遵守 60 秒以内的 retry-after，只对 408/409/429/5xx 重试。流中途失败且还没收到任何内容时，可重试的错误再试一次。每次尝试写入 `attempts` |
 | 错误分类 | 剥开 `NoOutputGeneratedError` 后，归类为 `MODEL_TIMEOUT`、`MODEL_CONNECTION`、`RATE_LIMITED`（可重试，计入熔断）、`AUTH_FAILED`、`CONTEXT_TOO_LONG`（按 `context_overflow` 处理）、`CONTENT_FILTER`、`MODEL_ERROR` |
 | reasoning 参数 | Anthropic：thinking 预算 2048 / 4096 / 8192；OpenAI：`reasoningEffort`，并开启 `parallelToolCalls`；Google：`thinkingConfig`，关闭时为 0；Ollama：`think`。强制开启 thinking 的模型，只有用户选择关闭时才注入关闭参数。SDK 会过滤的厂商私有参数在 fetch 层注入 |
-| 应用调用参数 | 应用为模型声明的 `callSettings`：`providerOptions` 按厂商键与上面的 reasoning 参数逐字段合并，同一字段应用优先；`headers` 与 AI SDK 的顶层 `reasoning` 原样传入。参数随模型配置固定 |
+| 应用调用参数 | 应用为模型声明的 `callSettings`：`providerOptions` 按厂商键与上面的 reasoning 参数逐字段合并，同一字段应用优先（具体的厂商参数优先于通用的推理档位，与 AI SDK 一致）；`headers` 与 AI SDK 的顶层 `reasoning` 原样传入。参数随模型配置固定。顶层 `reasoning` 与上面的 reasoning 参数是同一件事的两个通用开关，只能给一个，两个都给时创建提供方即报错 |
 | 消息规整 | `systemAfterUser=false` 的厂商：把 user 之后的 system 消息改写成带固定标记的 user 内容。清洗泄漏的工具调用标记 |
 | 推理回放 | 推理内容和签名原样带回；某个模型不能稳定接受带签名的回放时，适配器可以配置为丢弃历史推理内容 |
 | 工具选择 | 只在兜底交付时用 `toolChoice = 'none'`，工具定义照常传入；厂商不支持时忽略返回的工具调用 |
@@ -1446,7 +1446,7 @@ MCP 工具在引擎里叫 `<服务器名>__<工具名>`，交给 hook 匹配和�
 | 顾问 `modelAdvisor(opts)` | 可选，加入引擎守卫 | 纠偏后仍失败，或每 5 步周期检查发现异常时调一次模型；每次运行最多 3 次、间隔 ≥ 3 步（引导后不清零）；置信度 ≥ 0.5、封住的调用在窗口内且不是意图工具或轮询类工具、建议没给过才采纳 | 只告知与封路 | — |
 
 - 阈值用 `standardGuards({ thresholds })` 调整；`silentProgress: false` 关闭静默推进。
-- 错误类别：`INVALID_INPUT`、`PERMISSION_DENIED`、`USER_DENIED`、`SPAWN_*` 为确定性错误，其余为瞬时错误（`classifyError`）；工具可以在错误信封里用 `errorClass` 声明自己的类别，优先于按错误码判断。
+- 错误类别：`INVALID_INPUT`、`PERMISSION_DENIED`、`USER_DENIED`、`SPAWN_*` 为确定性错误，其余为瞬时错误（`classifyError`）；工具可以在错误信封里用 `errorClass` 声明自己的类别，优先于按错误码判断；只认 `deterministic` 与 `transient`，其他值按没写处理。
 - 业务守卫随任务、执行环境或能力提供，与标准守卫一起参与裁决。
 
 ### 10.2 先告知后终止

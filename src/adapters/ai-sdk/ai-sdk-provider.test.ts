@@ -311,12 +311,15 @@ describe('aiSdkProvider', () => {
       vendor: 'openai',
       reasoning: 'high',
       callSettings: {
-        providerOptions: { openai: { user: 'u', reasoningEffort: 'low' }, custom: { a: 1 } },
+        providerOptions: {
+          openai: { user: 'u', reasoningEffort: 'low', parallelToolCalls: false },
+          custom: { a: 1 },
+        },
       },
     })
     await run(port)
     expect(model.doStreamCalls[0]!.providerOptions).toEqual({
-      openai: { reasoningEffort: 'low', parallelToolCalls: true, user: 'u' },
+      openai: { reasoningEffort: 'low', parallelToolCalls: false, user: 'u' },
       custom: { a: 1 },
     })
   })
@@ -335,6 +338,25 @@ describe('aiSdkProvider', () => {
     })
     await run(port)
     expect(model.doStreamCalls[0]!.reasoning).toBe('none')
+  })
+
+  it('rejects a model that sets both reasoning and callSettings.reasoning, whatever the vendor', () => {
+    for (const vendor of ['anthropic', 'openai', 'other'] as const) {
+      const both = () =>
+        aiSdkProvider({
+          id: 'acme',
+          models: {
+            big: {
+              model: new MockLanguageModelV4({}),
+              vendor,
+              capabilities: { contextLimit: 1000 },
+              reasoning: 'off',
+              callSettings: { reasoning: 'high' },
+            },
+          },
+        })
+      expect(both).toThrow(/^模型 acme:big 同时设置了 reasoning 与 callSettings\.reasoning/)
+    }
   })
 
   it('F20 AC-004 leaves the call unchanged without call settings', async () => {

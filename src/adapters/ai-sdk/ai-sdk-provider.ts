@@ -43,6 +43,7 @@ export interface AiSdkModelConfig {
   /**
    * 应用为该模型声明、每次调用都带上的参数（设计 §8.1）：`providerOptions` 按厂商键与引擎生成的
    * 推理参数逐字段合并，同一字段应用优先；`headers` 与 AI SDK 的顶层 `reasoning` 原样传入。
+   * 顶层 `reasoning` 与上面的 `reasoning` 只能给一个。
    */
   callSettings?: {
     providerOptions?: Record<string, Record<string, unknown>>
@@ -297,6 +298,15 @@ export function aiSdkProvider(opts: {
   maxRetries?: number
   clock?: Clock
 }): ModelProvider {
+  for (const [name, config] of Object.entries(opts.models)) {
+    // 两个是同一件事的通用开关；厂商参数会盖过顶层 reasoning，任何先后规则都会因厂商而有漏洞，
+    // 所以只许给一个。
+    if (config.reasoning !== undefined && config.callSettings?.reasoning !== undefined) {
+      throw new Error(
+        `模型 ${opts.id}:${name} 同时设置了 reasoning 与 callSettings.reasoning，只能二选一`,
+      )
+    }
+  }
   const ports = new Map<string, ModelPort>()
   const settings = {
     maxRetries: opts.maxRetries ?? DEFAULT_MAX_RETRIES,

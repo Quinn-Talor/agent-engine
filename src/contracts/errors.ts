@@ -50,8 +50,8 @@ export interface ToolErrorEnvelope {
   hint?: string
   /**
    * 工具声明的错误类别：'deterministic' 表示同样的输入会得到同样的结果，'transient' 表示
-   * 下次可能就好。不写时按错误码判断（只有 INVALID_INPUT、PERMISSION_DENIED、USER_DENIED、
-   * SPAWN_* 算确定性的）。
+   * 下次可能就好。不写或写了其他值时按错误码判断（只有 INVALID_INPUT、PERMISSION_DENIED、
+   * USER_DENIED、SPAWN_* 算确定性的）。
    */
   errorClass?: 'deterministic' | 'transient'
 }

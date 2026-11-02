@@ -121,6 +121,27 @@ describe('executeTool', () => {
     ).not.toHaveProperty('unknown')
   })
 
+  it('keeps a declared error class only when it is deterministic or transient', async () => {
+    const signal = new AbortController().signal
+    const outcomeOf = (errorClass: unknown, thrown: boolean) => {
+      const envelope = { ...toolError('NOPE', 'no'), errorClass }
+      const { tool, clock } = setup({
+        run: () => (thrown ? Promise.reject(envelope) : envelope),
+      })
+      return executeTool(tool, {}, ctx(), { clock, signal })
+    }
+    for (const thrown of [false, true]) {
+      for (const errorClass of ['deterministic', 'transient']) {
+        expect(await outcomeOf(errorClass, thrown)).toMatchObject({ error: { errorClass } })
+      }
+      for (const bad of ['Deterministic', 'permanent', Object, 1, null]) {
+        expect(await outcomeOf(bad, thrown)).toEqual({
+          error: { __agent_error: true, code: 'NOPE', message: 'no' },
+        })
+      }
+    }
+  })
+
   it('aborts with the run', async () => {
     const { tool, clock } = setup({ delayMs: 1_000 })
     const controller = new AbortController()

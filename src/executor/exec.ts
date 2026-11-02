@@ -15,6 +15,15 @@ export type ExecOutcome = { value: unknown } | { error: ToolErrorEnvelope; unkno
 
 const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error))
 
+const ERROR_CLASSES: ReadonlySet<unknown> = new Set(['deterministic', 'transient'])
+
+/** 工具声明的错误类别只认两个合法值；其他值（拼错、配置里读来的任意值）丢掉，按错误码判断。 */
+function declared(envelope: ToolErrorEnvelope): ToolErrorEnvelope {
+  if (envelope.errorClass === undefined || ERROR_CLASSES.has(envelope.errorClass)) return envelope
+  const { errorClass: _dropped, ...rest } = envelope
+  return rest
+}
+
 export async function executeTool(
   tool: PreparedTool,
   input: unknown,
@@ -73,12 +82,12 @@ export async function executeTool(
     Promise.resolve()
       .then(() => def.execute(input, { ...ctx, signal, spawn }))
       .then(
-        (value) => finish(isToolError(value) ? { error: value } : { value }),
+        (value) => finish(isToolError(value) ? { error: declared(value) } : { value }),
         // 抛出的信封是工具明确报告的失败；其他异常不知道执行到了哪里。
         (error: unknown) =>
           finish(
             isToolError(error)
-              ? { error }
+              ? { error: declared(error) }
               : { error: toolError('TOOL_EXCEPTION', messageOf(error)), unknown: true },
           ),
       )
