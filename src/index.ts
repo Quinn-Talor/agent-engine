@@ -1,9 +1,10 @@
 // 包入口：应用 API、标准组件、不依赖外部库的适配器，以及带默认组件的 createEngine（方案 D10）。
-// 依赖外部库的适配器（ai、better-sqlite3、MCP SDK）和测试工具走子路径导出，主入口不加载它们。
+// 依赖外部库的适配器（ai、better-sqlite3、MCP SDK）和测试工具走子路径导出，包入口不静态加载它们。
 
 import { assembleEngine, createHookRunner, createMcpHost } from './api.js'
-import type { Engine, EngineConfig, HookRunner, McpConnect, McpHost } from './api.js'
+import type { Engine, EngineConfig, HookRunner, McpHost } from './api.js'
 import { consoleLogger } from './adapters/console-logger/console-logger.js'
+import { mcpConnect } from './adapters/mcp-connect.js'
 import { processExec } from './adapters/hook-process/hook-process.js'
 import { completionReview } from './stdlib/checks/completion-review.js'
 import { standardFallback } from './stdlib/delivery/standard-fallback.js'
@@ -13,15 +14,6 @@ import { compactingMemory } from './stdlib/memory/compacting-memory.js'
 import { standardGuards } from './stdlib/supervision/standard-guards.js'
 
 export * from './api.js'
-
-/**
- * 按传输方式分派到官方 SDK 的 stdio / Streamable HTTP 适配器。
- * 第一次连接时才加载：MCP SDK 是可选的 peer 依赖，不用 MCP 的应用不必安装。
- */
-const mcpConnect: McpConnect = async (server, opts) =>
-  server.transport.kind === 'stdio'
-    ? (await import('./adapters/mcp-stdio/mcp-stdio.js')).stdioConnect(server, opts)
-    : (await import('./adapters/mcp-http/mcp-http.js')).httpConnect(server, opts)
 
 /** 用子进程执行 hook 的 hook 执行器（设计 §8.3）。 */
 export function hookRunner(): HookRunner {

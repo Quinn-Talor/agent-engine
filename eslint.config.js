@@ -25,11 +25,6 @@ const TESTING_ENTRY = {
   regex: '^(\\.{1,2}/)+testing\\.js$',
   message: '不得依赖测试工具入口 testing.ts',
 }
-/** 依赖外部库的适配器：主入口只能动态加载，不能静态 import。 */
-const EXTERNAL_ADAPTERS = {
-  regex: '(^|/)adapters/(ai-sdk|sqlite|mcp-stdio|mcp-http)/',
-  message: '主入口不得静态加载依赖外部库的适配器（它们走子路径导出）',
-}
 /** 不属于组件的入口：组件只经 sdk.ts 取用引擎能力。 */
 const ENTRIES = [API, SDK, INDEX, TESTING_ENTRY]
 const nodeBuiltins = (allowed = []) => ({
@@ -49,6 +44,15 @@ const ADAPTER_PACKAGES = {
   'mcp-http': ['@modelcontextprotocol/sdk'],
   'hook-process': [],
   'console-logger': [],
+}
+
+/** 依赖外部库的适配器（上表里声明了外部包的）：包入口只能动态加载，不能静态 import。 */
+const EXTERNAL_ADAPTERS = {
+  regex: `(^|/)adapters/(${Object.entries(ADAPTER_PACKAGES)
+    .filter(([, allowed]) => allowed.length > 0)
+    .map(([name]) => escape(name))
+    .join('|')})/`,
+  message: '包入口不得静态加载依赖外部库的适配器（它们走子路径导出）',
 }
 
 /** 组件（标准组件、适配器、测试工具）只经 sdk.ts 取用引擎能力。 */

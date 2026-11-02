@@ -1669,7 +1669,8 @@ src/
                  进程内的默认实现（系统时钟、内存档案）
   engine/        装配根与回归重放；run/（运行驱动、受理、准备、取消与截止、子运行、订阅与通知、结果、运行上下文、血缘）
   stdlib/        标准组件，按槽位分组；claude-code/ 放 Claude Code 格式的解析与 hook 适配
-  adapters/      依赖外部库或外部进程的端口实现：ai-sdk、sqlite、mcp-stdio、mcp-http、hook-process、console-logger
+  adapters/      依赖外部库或外部进程的端口实现：ai-sdk、sqlite、mcp-stdio、mcp-http、hook-process、console-logger；
+                 mcp-connect 按传输方式分派，第一次连接时才加载 MCP 适配器
   testing/       测试替身、运行与断言、一致性测试、故障注入、存储契约测试
 test/
   arch/          依赖方向、项目文档与仓库配置的一致性
@@ -1678,7 +1679,7 @@ test/
 
 单元测试与源文件同目录（`<名称>.test.ts`）；只被测试使用的构造放在 `*.fixture.ts`，构建和覆盖率都排除。
 
-**依赖方向**：`contracts ← core ← executor ← engine`，`services` 只被 `engine` 和入口使用；`stdlib/`、`adapters/`、`testing/` 只经 `sdk.ts` 取用引擎能力；包入口不带测试工具，也不静态加载依赖外部库的适配器。精确的规则只写在 `eslint.config.js` 的依赖方向段并由 lint 强制，`test/arch/boundaries.test.ts` 锁定行为；其他文档不再另抄依赖表。
+**依赖方向**：`contracts ← core ← executor ← engine`；`services` 依赖 `core` 与 `contracts`，只被 `engine` 和入口使用；`stdlib/`、`adapters/`、`testing/` 只经 `sdk.ts` 取用引擎能力；包入口不带测试工具，也不静态加载依赖外部库的适配器。精确的规则只写在 `eslint.config.js` 的依赖方向段并由 lint 强制，`test/arch/boundaries.test.ts` 锁定行为；其他文档不再另抄依赖表。
 
 **放 `services/` 还是 `adapters/`**：依赖外部库或外部进程（含标准输出）的端口实现放 `adapters/`；引擎自带、在进程内就能完成的默认实现（系统时钟、内存档案）放 `services/`，因为 services 自己的工厂也拿它们作默认值。
 
