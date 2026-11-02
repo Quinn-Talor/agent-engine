@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { LogEntry } from '../../api.js'
+import type { LogEntry } from '../../sdk.js'
 import { langfuseExporter, type LangfuseEvent } from './langfuse-exporter.js'
 import { runEvents } from './run.fixture.js'
 

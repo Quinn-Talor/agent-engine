@@ -1,7 +1,7 @@
 // Langfuse 导出（设计 §6.6、方案 D7）：运行事件 → Langfuse ingestion 事件数据：trace、span、generation
 // （模型调用，带模型与用量）；只产出数据结构，发送由应用注入。
 
-import type { Logger } from '../../api.js'
+import type { Logger } from '../../sdk.js'
 import { exportOnEnd, walk, type ExportSubscriber } from './trace-export.js'
 
 export interface LangfuseEvent {

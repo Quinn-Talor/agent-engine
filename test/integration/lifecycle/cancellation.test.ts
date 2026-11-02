@@ -6,11 +6,11 @@ import {
   createEngine,
   defineAgent,
   defineTask,
-  fakeModel,
   modelHub,
   type HookResult,
   type HookRunner,
 } from '../../../src/index.js'
+import { fakeModel } from '../../../src/testing.js'
 
 describe('cancellation reaches components', () => {
   it('AC-015 aborts a running hook when the run is cancelled', async () => {

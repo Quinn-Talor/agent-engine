@@ -1,6 +1,6 @@
 // skill 能力（设计 §4.2）：按内容哈希冻结 SKILL.md；能力说明里列出 skill；共享 skill 宿主的激活工具。
 
-import type { Capability, SkillHost, SkillPackage } from '../../api.js'
+import type { Capability, SkillHost, SkillPackage } from '../../sdk.js'
 
 export function skill(pkg: SkillPackage): Capability {
   return {

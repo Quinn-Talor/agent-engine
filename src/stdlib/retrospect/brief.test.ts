@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { emptyRunUsage, type RunRetrospective } from '../../api.js'
+import { emptyRunUsage, type RunRetrospective } from '../../sdk.js'
 import { retrospect } from './brief.js'
 
 const retro = (patch: Partial<RunRetrospective> = {}): RunRetrospective => ({

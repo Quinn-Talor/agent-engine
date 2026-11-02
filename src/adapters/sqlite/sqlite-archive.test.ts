@@ -9,7 +9,7 @@ import {
   type RunEvent,
   type RunEventBody,
   type RunResult,
-} from '../../api.js'
+} from '../../sdk.js'
 import { archiveStoreContract } from '../../testing/archive-contract.js'
 import { FakeClock } from '../../testing/fake-clock.js'
 import { sqliteArchive } from './sqlite-archive.js'

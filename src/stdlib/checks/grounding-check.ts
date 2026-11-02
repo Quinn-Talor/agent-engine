@@ -1,7 +1,7 @@
 // 引用核对验收（设计 §10.6）：累计 ≥ 2 处无法核实就不通过，提示列出内容，要求修正或删除。
 // 默认 shadow：先校准，准确后交互场景用 annotate，高风险后台任务用 gate。
 
-import type { Check, CheckMode } from '../../api.js'
+import type { Check, CheckMode } from '../../sdk.js'
 import { grounding } from './grounding.js'
 
 const DEFAULT_THRESHOLD = 2

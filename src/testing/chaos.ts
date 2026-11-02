@@ -4,7 +4,7 @@
 // 超时不是立即报错，而是挂起，等调用方的计时器或取消来结束：模型调用等模型库的首 token、空闲、单次时长
 // 计时器（走模型库的时钟）或取消；hook 等 `timeoutMs`（走 `clock`，默认系统时钟）或取消。
 
-import { ModelCallError, abortError, seededRandom, systemClock } from '../api.js'
+import { ModelCallError, abortError, seededRandom, systemClock } from '../sdk.js'
 import type { HookExec, HookExecResult } from '../contracts/capability.js'
 import type { McpConnect, McpConnection } from '../contracts/mcp.js'
 import type { Clock } from '../contracts/common.js'

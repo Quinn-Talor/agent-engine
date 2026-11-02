@@ -7,7 +7,7 @@ import {
   type HookExecResult,
   type ModelProvider,
   type ResolvedMcpServer,
-} from '../api.js'
+} from '../sdk.js'
 import type { Delta, ModelInput } from '../contracts/model.js'
 import { chaos } from './chaos.js'
 import { testHarness, twoSteps } from './engine.fixture.js'

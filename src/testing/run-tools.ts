@@ -7,7 +7,7 @@ import {
   type RegressionInput,
   type RegressionReport,
   type StrictReplay,
-} from '../api.js'
+} from '../sdk.js'
 import type { ArchiveStore, RunEvent } from '../contracts/events.js'
 import type { Run, RunResult } from '../contracts/run.js'
 

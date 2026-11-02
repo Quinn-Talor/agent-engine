@@ -3,23 +3,20 @@
 
 import { describe, expect, it } from 'vitest'
 import {
-  checkInvariants,
   createEngine,
   defineAgent,
   defineTask,
-  fakeModel,
-  fakeTool,
   memoryArchive,
   modelHub,
   planning,
-  runToEnd,
   toolError,
   tools,
   type Capability,
-  type FakeReply,
   type Run,
   type RunEvent,
 } from '../../../src/index.js'
+import { fakeModel, fakeTool, runToEnd, type FakeReply } from '../../../src/testing.js'
+import { checkInvariants } from '../../../src/sdk.js'
 
 const quiet = { log: () => {} }
 

@@ -3,7 +3,7 @@
 
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
-import type { McpConnect } from '../../api.js'
+import type { McpConnect } from '../../sdk.js'
 import { CLIENT_INFO, wrapClient } from '../mcp-stdio/mcp-client.js'
 
 export const httpConnect: McpConnect = async (server, { signal }) => {

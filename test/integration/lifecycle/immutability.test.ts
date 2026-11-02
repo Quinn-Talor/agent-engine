@@ -6,15 +6,12 @@ import {
   createEngine,
   defineAgent,
   defineTask,
-  fakeModel,
-  fakeTool,
   memoryArchive,
   modelHub,
   strictReplay,
   structured,
   tools,
   type Capability,
-  type FakeReply,
   type Guard,
   type LogEntry,
   type Notice,
@@ -22,6 +19,7 @@ import {
   type RunEvent,
   type Segment,
 } from '../../../src/index.js'
+import { fakeModel, fakeTool, type FakeReply } from '../../../src/testing.js'
 
 const sys = (text: string): Segment => ({ role: 'system', parts: [{ type: 'text', text }] })
 const user = (text: string): Segment => ({ role: 'user', parts: [{ type: 'text', text }] })

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
-import type { SkillHost, SkillPackage } from '../../api.js'
-import { skillHost } from '../../api.js'
+import type { SkillHost, SkillPackage } from '../../sdk.js'
+import { skillHost } from '../../sdk.js'
 import { prepareCtx } from './prepare.fixture.js'
 import { skill } from './skill.js'
 

@@ -3,7 +3,7 @@
 // 仅 Anthropic 在断点所在消息上打 ephemeral 缓存标记；清洗回复里泄漏的工具调用标记。
 
 import type { ModelMessage as SdkModelMessage } from 'ai'
-import type { ModelMessage } from '../../api.js'
+import type { ModelMessage } from '../../sdk.js'
 
 type SdkAssistantPart = Exclude<
   Extract<SdkModelMessage, { role: 'assistant' }>['content'],

@@ -2,8 +2,8 @@
 // 按节点路径生成稳定的 id；发起子运行的工具节点的 id 由子运行 id 得出，子运行的根节点据此挂到它下面。
 // 发送函数由应用注入，失败只写诊断日志。
 
-import { buildTrace, sha256Hex } from '../../api.js'
-import type { Logger, RunEvent, RunSubscriber, TraceNode } from '../../api.js'
+import { buildTrace, sha256Hex } from '../../sdk.js'
+import type { Logger, RunEvent, RunSubscriber, TraceNode } from '../../sdk.js'
 
 export interface ExportNode {
   node: TraceNode

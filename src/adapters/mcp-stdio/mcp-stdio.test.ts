@@ -1,6 +1,6 @@
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it, vi } from 'vitest'
-import type { McpConnection, ResolvedMcpServer } from '../../api.js'
+import type { McpConnection, ResolvedMcpServer } from '../../sdk.js'
 import { stdioConnect } from './mcp-stdio.js'
 
 const fixture = fileURLToPath(new URL('./echo-server.fixture.ts', import.meta.url))

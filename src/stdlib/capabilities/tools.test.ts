@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { z } from 'zod'
-import { defineAgent } from '../../api.js'
+import { defineAgent } from '../../sdk.js'
 import type { Capability } from '../../contracts/capability.js'
 import type { ToolDef } from '../../contracts/tool.js'
 import { fakeTool } from '../../testing/fake-tool.js'

@@ -1,7 +1,7 @@
 // 控制台诊断日志（设计 §6.6）：引擎默认的 Logger。按级别过滤，写入前按模式脱敏；
 // 运行凭据的脱敏由引擎在外层包装。
 
-import { redactText, redactValue } from '../../api.js'
+import { redactText, redactValue } from '../../sdk.js'
 import type { LogLevel, Logger } from '../../contracts/common.js'
 
 const ORDER: Record<LogLevel, number> = { debug: 0, info: 1, warn: 2, error: 3 }

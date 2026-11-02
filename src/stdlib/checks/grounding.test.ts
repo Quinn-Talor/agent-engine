@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { Corpus } from '../../api.js'
+import type { Corpus } from '../../sdk.js'
 import { grounding } from './grounding.js'
 
 const corpus = (tool: string, input = '分析贵州茅台'): Corpus => ({

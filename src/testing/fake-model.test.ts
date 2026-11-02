@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { estimateMessages, estimateText, isAbortError, isModelCallError } from '../api.js'
+import { estimateMessages, estimateText, isAbortError, isModelCallError } from '../sdk.js'
 import type { Delta, ModelInput } from '../contracts/model.js'
 import { FakeClock } from './fake-clock.js'
 import { fakeModel } from './fake-model.js'

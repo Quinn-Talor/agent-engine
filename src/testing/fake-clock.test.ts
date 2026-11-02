@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { systemClock } from '../api.js'
+import { systemClock } from '../sdk.js'
 import { FakeClock } from './fake-clock.js'
 
 describe('FakeClock', () => {

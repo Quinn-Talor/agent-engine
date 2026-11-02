@@ -15,11 +15,11 @@ import {
   createEngine,
   defineAgent,
   defineTask,
-  fakeModel,
   modelHub,
-  sqliteArchive,
   type RunEvent,
 } from '../../../src/index.js'
+import { fakeModel } from '../../../src/testing.js'
+import { sqliteArchive } from '../../../src/adapters/sqlite/sqlite-archive.js'
 
 const quiet = { log: () => {} }
 const dirs: string[] = []

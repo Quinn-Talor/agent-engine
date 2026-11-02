@@ -5,7 +5,7 @@ import {
   StdioClientTransport,
   getDefaultEnvironment,
 } from '@modelcontextprotocol/sdk/client/stdio.js'
-import type { McpConnect } from '../../api.js'
+import type { McpConnect } from '../../sdk.js'
 import { CLIENT_INFO, wrapClient } from './mcp-client.js'
 
 export const stdioConnect: McpConnect = async (server, { signal }) => {

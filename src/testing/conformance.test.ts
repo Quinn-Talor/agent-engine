@@ -8,7 +8,7 @@ import type {
   MemoryView,
   ModelMessage,
   PermissionRule,
-} from '../api.js'
+} from '../sdk.js'
 import type { ContractCase } from './archive-contract.js'
 import { conformance } from './conformance.js'
 

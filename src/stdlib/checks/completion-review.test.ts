@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import type { Candidate, ComponentCtx, Corpus, SideModelRequest } from '../../api.js'
+import type { Candidate, ComponentCtx, Corpus, SideModelRequest } from '../../sdk.js'
 import { runInfo } from '../capabilities/prepare.fixture.js'
 import { obs } from '../supervision/observations.fixture.js'
 import { completionReview, riskScore } from './completion-review.js'

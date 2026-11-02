@@ -3,14 +3,10 @@
 
 import { describe, expect, it } from 'vitest'
 import {
-  FakeClock,
-  assertInvariants,
   completionReview,
   createEngine,
   defineAgent,
   defineTask,
-  fakeModel,
-  fakeTool,
   foldState,
   intents,
   memoryArchive,
@@ -18,16 +14,22 @@ import {
   retrospect,
   retrospective,
   riskApproval,
-  runToEnd,
   tools,
   transcriptMessages,
   type ArchiveStore,
   type BlobRef,
-  type FakeReply,
   type Guard,
   type ModelMessage,
   type RunEvent,
 } from '../../../src/index.js'
+import {
+  FakeClock,
+  assertInvariants,
+  fakeModel,
+  fakeTool,
+  runToEnd,
+  type FakeReply,
+} from '../../../src/testing.js'
 
 const quiet = { log: () => {} }
 const userText = (text: string) => ({

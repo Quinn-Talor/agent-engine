@@ -1,7 +1,7 @@
 // 复盘说明（设计 §10.8）：由复盘确定性地生成一段文本——上次试了什么、卡在哪里、已执行的副作用，
 // 供应用追加到重跑任务的输入里。
 
-import type { RunRetrospective } from '../../api.js'
+import type { RunRetrospective } from '../../sdk.js'
 
 const RECENT_STEPS = 10
 const SIGNAL_NAMES = { warn: '告知', end: '终止', awaitInput: '等待输入' } as const

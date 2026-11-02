@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { memoryArchive, type ArchiveStore } from '../api.js'
+import { memoryArchive, type ArchiveStore } from '../sdk.js'
 import { archiveStoreContract } from './archive-contract.js'
 
 describe('archiveStoreContract on memoryArchive', () => {

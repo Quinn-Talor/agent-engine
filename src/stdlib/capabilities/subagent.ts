@@ -1,6 +1,6 @@
 // 子 agent 能力（设计 §4.2）：声明可委托的 Agent；快照指纹为子 agent 的指纹；共享委托宿主的委托工具。
 
-import type { Agent, Budget, Capability, DelegationHost, Environment } from '../../api.js'
+import type { Agent, Budget, Capability, DelegationHost, Environment } from '../../sdk.js'
 
 const DESCRIPTION_CHARS = 200
 

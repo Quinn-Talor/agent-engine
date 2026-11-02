@@ -3,7 +3,7 @@
 // 依赖不可用由失败连击（external_failure）与封路处理。
 
 import { z } from 'zod'
-import { hashOf, toolError } from '../../api.js'
+import { hashOf, toolError } from '../../sdk.js'
 import type {
   Capability,
   JsonValue,
@@ -13,7 +13,7 @@ import type {
   McpToolInfo,
   ToolDef,
   ToolEffect,
-} from '../../api.js'
+} from '../../sdk.js'
 
 const DEFAULT_CALL_TIMEOUT_MS = 30_000
 /** 厂商通用的工具名格式。 */

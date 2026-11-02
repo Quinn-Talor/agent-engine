@@ -1,6 +1,6 @@
 // 测试用 MCP 服务器（设计 §13）：脚本化的工具与结果，可以注入连接延迟、连接失败、调用延迟、工具列表变化与断连。
 
-import { abortError, systemClock } from '../api.js'
+import { abortError, systemClock } from '../sdk.js'
 import type {
   McpCallResult,
   McpConnect,

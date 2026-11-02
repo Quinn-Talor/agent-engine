@@ -2,8 +2,8 @@
 // 超时或取消时先 SIGTERM、1 秒后 SIGKILL，结束整个进程组；输出各保留前 1MB。
 
 import { spawn } from 'node:child_process'
-import { abortError } from '../../api.js'
-import type { HookExec } from '../../api.js'
+import { abortError } from '../../sdk.js'
+import type { HookExec } from '../../sdk.js'
 
 const MAX_OUTPUT_BYTES = 1_048_576
 const KILL_GRACE_MS = 1000

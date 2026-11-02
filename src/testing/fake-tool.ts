@@ -1,7 +1,7 @@
 // 测试工具（设计 §13）：可脚本化的工具定义，记录每次调用，可注入延迟。
 
 import { z, type ZodType } from 'zod'
-import { abortError, systemClock } from '../api.js'
+import { abortError, systemClock } from '../sdk.js'
 import type { Clock, JsonSchema } from '../contracts/common.js'
 import type { ToolAccess, ToolCtx, ToolDef, ToolEffect, ToolIntent } from '../contracts/tool.js'
 

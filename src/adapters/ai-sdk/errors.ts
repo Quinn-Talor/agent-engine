@@ -2,7 +2,7 @@
 // RATE_LIMITED、AUTH_FAILED、CONTEXT_TOO_LONG、CONTENT_FILTER、MODEL_ERROR；模型库据此决定是否计入熔断。
 
 import { APICallError, NoOutputGeneratedError, RetryError } from 'ai'
-import type { ModelAttempt, ModelError, ModelErrorCode } from '../../api.js'
+import type { ModelAttempt, ModelError, ModelErrorCode } from '../../sdk.js'
 
 // Anthropic：input length and `max_tokens` exceed context limit；Gemini：input token count … exceeds the
 // maximum number of tokens allowed；OpenAI：maximum context length。

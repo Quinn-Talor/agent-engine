@@ -7,7 +7,7 @@ import type {
   HookSpec,
   RunInfo,
   ToolCallView,
-} from '../../api.js'
+} from '../../sdk.js'
 import { runInfo } from '../capabilities/prepare.fixture.js'
 import { obs, tool } from '../supervision/observations.fixture.js'
 import { adaptHooks } from './adapt-hooks.js'

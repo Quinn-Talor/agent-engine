@@ -2,7 +2,7 @@ import type { LanguageModelV4StreamPart } from '@ai-sdk/provider'
 import { APICallError } from 'ai'
 import { MockLanguageModelV4, convertArrayToReadableStream } from 'ai/test'
 import { beforeAll, describe, expect, it } from 'vitest'
-import { isModelCallError, type Delta, type ModelInput, type ModelPort } from '../../api.js'
+import { isModelCallError, type Delta, type ModelInput, type ModelPort } from '../../sdk.js'
 import { aiSdkProvider, type AiSdkModelConfig } from './ai-sdk-provider.js'
 
 beforeAll(() => {

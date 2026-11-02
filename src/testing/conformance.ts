@@ -4,7 +4,7 @@
 // 记忆的样本覆盖压缩触发线上下（设计 §11，默认 0.8）与超出窗口；副模型替身返回固定摘要，让记忆真的压缩。
 
 import assert from 'node:assert/strict'
-import { canonicalJson, guardOpinionIssue, permitResultIssue } from '../api.js'
+import { canonicalJson, guardOpinionIssue, permitResultIssue } from '../sdk.js'
 import type { ModelMessage } from '../contracts/common.js'
 import type {
   Candidate,

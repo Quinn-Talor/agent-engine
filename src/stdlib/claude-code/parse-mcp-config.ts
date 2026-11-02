@@ -3,7 +3,7 @@
 // （例如 `Bearer ${TOKEN}`）带上原文模板，由 MCP 宿主解析；一个值只能引用一个变量。
 // 只解析标准格式，SSE 传输暂不支持。
 
-import type { McpServerSpec, SecretRef } from '../../api.js'
+import type { McpServerSpec, SecretRef } from '../../sdk.js'
 
 const SECRET = /^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$/
 const EMBEDDED = /\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g

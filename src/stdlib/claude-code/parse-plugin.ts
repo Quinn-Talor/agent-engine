@@ -4,7 +4,7 @@
 
 import { readFile, readdir } from 'node:fs/promises'
 import { basename, join } from 'node:path'
-import type { AgentDef, HookSpec, McpServerSpec, SkillPackage } from '../../api.js'
+import type { AgentDef, HookSpec, McpServerSpec, SkillPackage } from '../../sdk.js'
 import { parseMcpConfig } from './parse-mcp-config.js'
 import { parseSkill, splitFrontmatter } from './parse-skill.js'
 

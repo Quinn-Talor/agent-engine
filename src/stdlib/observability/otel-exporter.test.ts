@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { sha256Hex, type LogEntry } from '../../api.js'
+import { sha256Hex, type LogEntry } from '../../sdk.js'
 import { otelExporter, type OtelSpan } from './otel-exporter.js'
 import { runEvents } from './run.fixture.js'
 

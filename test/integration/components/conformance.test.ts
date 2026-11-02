@@ -5,7 +5,6 @@ import {
   adaptHooks,
   completionReview,
   compactingMemory,
-  conformance,
   createHookRunner,
   groundingCheck,
   modelAdvisor,
@@ -15,9 +14,9 @@ import {
   standardGuards,
   workspaceSandbox,
   type ComponentCtx,
-  type ContractCase,
   type HookExecResult,
 } from '../../../src/index.js'
+import { conformance, type ContractCase } from '../../../src/testing.js'
 
 const exitWith = (result: Partial<HookExecResult>) => {
   const runner = createHookRunner({

@@ -6,14 +6,13 @@ import {
   createMcpHost,
   defineAgent,
   defineTask,
-  fakeMcpServer,
-  fakeModel,
   mcp,
   memoryArchive,
   modelHub,
   type McpServerSpec,
   type RunEvent,
 } from '../../../src/index.js'
+import { fakeMcpServer, fakeModel } from '../../../src/testing.js'
 
 const quiet = { log: () => {} }
 

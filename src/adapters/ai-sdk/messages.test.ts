@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { ModelMessage, ToolCallPart } from '../../api.js'
+import type { ModelMessage, ToolCallPart } from '../../sdk.js'
 import { cleanLeakedToolMarkup, toSdkMessages } from './messages.js'
 
 const view: ModelMessage[] = [

@@ -3,8 +3,8 @@
 // 委托人联系不上时，回答里向委托人提问的交付也要审查：没有人会回答，这样的"完成"是假完成。
 // 回答只预告动作（"我先查一下"）就结束的，同样是假完成。createEngine 默认带上这项验收。
 
-import { canonicalJson } from '../../api.js'
-import type { Candidate, Check, CheckMode, Corpus, ModelRef } from '../../api.js'
+import { canonicalJson } from '../../sdk.js'
+import type { Candidate, Check, CheckMode, Corpus, ModelRef } from '../../sdk.js'
 import { PLAN_PROGRESS } from '../capabilities/planning.js'
 
 const RISK_THRESHOLD = 3

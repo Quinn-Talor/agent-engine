@@ -7,7 +7,7 @@
 import { createRequire } from 'node:module'
 import { gunzipSync, gzipSync } from 'node:zlib'
 import type BetterSqlite3 from 'better-sqlite3'
-import { SCHEMA_VERSION, sha256Hex, summarize, systemClock, upcastEvent } from '../../api.js'
+import { SCHEMA_VERSION, sha256Hex, summarize, systemClock, upcastEvent } from '../../sdk.js'
 import type {
   ArchiveStore,
   BlobRef,
@@ -18,7 +18,7 @@ import type {
   RunFilter,
   RunSummary,
   RunUsage,
-} from '../../api.js'
+} from '../../sdk.js'
 
 const DAY_MS = 86_400_000
 /** putBlob 之后、引用它的事件写入之前的宽限期：运行可能刚去重拿到引用、还没写进事件。 */

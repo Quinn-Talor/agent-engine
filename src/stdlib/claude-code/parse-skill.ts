@@ -4,7 +4,7 @@
 
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { sha256Hex, type SkillPackage } from '../../api.js'
+import { sha256Hex, type SkillPackage } from '../../sdk.js'
 
 /** 块标量的头：`>` 或 `|`，后面可跟截尾标记（`+`、`-`）与缩进数字，顺序不限。 */
 const BLOCK_HEADER = /^([>|])(?:[+-]?[1-9]?|[1-9][+-])$/

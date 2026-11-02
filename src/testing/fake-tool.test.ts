@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { z } from 'zod'
-import { isAbortError } from '../api.js'
+import { isAbortError } from '../sdk.js'
 import type { ToolCtx } from '../contracts/tool.js'
 import { FakeClock } from './fake-clock.js'
 import { fakeTool } from './fake-tool.js'

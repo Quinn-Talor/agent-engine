@@ -1,6 +1,6 @@
 // 测试用运行事件：两步、一次失败的工具调用、一次监督模型调用、一条意见（只被测试使用）。
 
-import type { Observation, RunEvent, RunEventBody } from '../../api.js'
+import type { Observation, RunEvent, RunEventBody } from '../../sdk.js'
 
 const usage = (input: number, output: number) => ({ input, output, cacheRead: 0, cacheWrite: 0 })
 

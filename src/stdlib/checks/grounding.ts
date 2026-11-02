@@ -1,7 +1,7 @@
 // 引用核对（设计 §10.6、§11 文本处理）：引号内 ≥ 20 字节的引文和实体名，在语料中找不到就算无法核实。
 // 比较前规范化数字（千分位、小数位、百分号）和单位（万、亿等）。groundingCheck 与 sanitize 共用这里的核对。
 
-import type { Corpus } from '../../api.js'
+import type { Corpus } from '../../sdk.js'
 
 const MIN_QUOTE_BYTES = 20
 const QUOTE = /"([^"\n]+)"|“([^”\n]+)”|「([^」\n]+)」|`([^`\n]+)`/g

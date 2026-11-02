@@ -2,8 +2,8 @@
 // 发送由应用注入。traceId 由根运行 id 得出，同一棵委托树的运行在同一条 trace 里；子运行的根 span
 // 挂在父运行发起它的工具 span 下。
 
-import { sha256Hex } from '../../api.js'
-import type { Logger, TraceNode } from '../../api.js'
+import { sha256Hex } from '../../sdk.js'
+import type { Logger, TraceNode } from '../../sdk.js'
 import { delegateNodeId, exportOnEnd, walk, type ExportSubscriber } from './trace-export.js'
 
 export interface OtelSpan {

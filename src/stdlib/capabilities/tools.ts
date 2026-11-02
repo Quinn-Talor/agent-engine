@@ -1,7 +1,7 @@
 // 标准能力：工具、工具集、能力包（设计 §4.2）。
 
 import { z, type ZodType } from 'zod'
-import { hashOf, toolError } from '../../api.js'
+import { hashOf, toolError } from '../../sdk.js'
 import type { Capability, Prepared } from '../../contracts/capability.js'
 import type { Segment } from '../../contracts/common.js'
 import type { Guard } from '../../contracts/component.js'

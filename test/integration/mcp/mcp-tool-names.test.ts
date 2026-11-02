@@ -5,13 +5,12 @@ import {
   createMcpHost,
   defineAgent,
   defineTask,
-  fakeMcpServer,
-  fakeModel,
-  hashOf,
   mcp,
   memoryArchive,
   modelHub,
 } from '../../../src/index.js'
+import { fakeMcpServer, fakeModel } from '../../../src/testing.js'
+import { hashOf } from '../../../src/sdk.js'
 
 const VALID_TOOL_NAME = /^[A-Za-z0-9_-]{1,64}$/
 const quiet = { log: () => {} }

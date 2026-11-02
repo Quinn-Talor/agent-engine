@@ -3,7 +3,7 @@
 // 正则对参数里的每个原始字符串逐一检查（不对 JSON 文本检查，换行转义成 `\n` 会让 `\b` 失效）；
 // 全是字符串的数组（argv）另外按空格拼起来检查。
 
-import type { PermissionRule } from '../../api.js'
+import type { PermissionRule } from '../../sdk.js'
 
 const SUMMARY_CHARS = 200
 const INPUT_CHARS = 2000

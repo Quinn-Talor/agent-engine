@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { ArchiveStore, Run, RunEvent, RunResult } from '../api.js'
+import type { ArchiveStore, Run, RunEvent, RunResult } from '../sdk.js'
 import { testDefaults, testHarness, twoSteps } from './engine.fixture.js'
 import { assertInvariants, replay, runToEnd } from './run-tools.js'
 

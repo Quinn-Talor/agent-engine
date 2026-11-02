@@ -4,12 +4,11 @@ import {
   createEngine,
   defineAgent,
   defineTask,
-  fakeModel,
-  fakeTool,
   memoryArchive,
   modelHub,
   tools,
 } from '../../../src/index.js'
+import { fakeModel, fakeTool } from '../../../src/testing.js'
 
 const quiet = { log: () => {} }
 type Replies = Parameters<typeof fakeModel>[0]['replies']

@@ -4,28 +4,22 @@
 
 import { describe, expect, it } from 'vitest'
 import {
-  FakeClock,
-  chaos,
-  checkInvariants,
   compactingMemory,
   createEngine,
   defineAgent,
   defineTask,
-  fakeModel,
-  fakeTool,
-  inputHash,
   memoryArchive,
   modelHub,
-  seededRandom,
   strictReplay,
   subagent,
   tools,
   type Check,
-  type FakeReply,
   type Guard,
   type ModelInput,
   type RunEvent,
 } from '../../src/index.js'
+import { FakeClock, chaos, fakeModel, fakeTool, type FakeReply } from '../../src/testing.js'
+import { checkInvariants, inputHash, seededRandom } from '../../src/sdk.js'
 
 const SEEDS = Array.from({ length: 60 }, (_, i) => i + 1)
 const MAX_TICKS = 400

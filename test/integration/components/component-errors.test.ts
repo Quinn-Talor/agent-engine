@@ -5,8 +5,6 @@ import {
   createEngine,
   defineAgent,
   defineTask,
-  fakeModel,
-  fakeTool,
   modelHub,
   standardFallback,
   text,
@@ -14,13 +12,13 @@ import {
   type Check,
   type EngineConfig,
   type Exposure,
-  type FakeReply,
   type Guard,
   type LogEntry,
   type Memory,
   type NoticeProvider,
   type RunResult,
 } from '../../../src/index.js'
+import { fakeModel, fakeTool, type FakeReply } from '../../../src/testing.js'
 
 const sys = { role: 'system' as const, parts: [{ type: 'text' as const, text: '你是助手' }] }
 const input = [{ role: 'user' as const, parts: [{ type: 'text' as const, text: '你好' }] }]

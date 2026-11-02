@@ -6,7 +6,7 @@
 import { readlink, realpath } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { basename, dirname, isAbsolute, join, parse, resolve, sep } from 'node:path'
-import type { PermissionRule, RunInfo } from '../../api.js'
+import type { PermissionRule, RunInfo } from '../../sdk.js'
 
 /** 内置敏感名单（不可删除，运行时冻结，方案 D6）：凭据、密钥与账号目录。 */
 export const BUILT_IN_SENSITIVE: readonly string[] = Object.freeze([

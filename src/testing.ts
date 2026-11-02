@@ -1,0 +1,17 @@
+// 测试工具入口（`agent-engine/testing`，设计 §13）：测试替身、运行与断言、一致性测试、故障注入、存储契约测试。
+
+export { archiveStoreContract } from './testing/archive-contract.js'
+export type { ContractCase } from './testing/archive-contract.js'
+export { FakeClock } from './testing/fake-clock.js'
+export { fakeModel } from './testing/fake-model.js'
+export type { FakeModel, FakeReply } from './testing/fake-model.js'
+export { fakeTool } from './testing/fake-tool.js'
+export type { FakeTool, FakeToolOptions } from './testing/fake-tool.js'
+export { fakeMcpServer } from './testing/fake-mcp-server.js'
+export type { FakeMcpServer, FakeMcpTool } from './testing/fake-mcp-server.js'
+export { assertInvariants, replay, runToEnd } from './testing/run-tools.js'
+export type { RegressionMode } from './testing/run-tools.js'
+export { chaos } from './testing/chaos.js'
+export type { Chaos, ChaosFault } from './testing/chaos.js'
+export { conformance } from './testing/conformance.js'
+export type { ConformanceOptions } from './testing/conformance.js'

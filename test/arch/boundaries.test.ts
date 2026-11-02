@@ -37,10 +37,15 @@ describe('dependency direction', () => {
     expect(await lintImport('src/engine/a.ts', '../executor/b.js')).toEqual([])
   })
 
-  it('AC-008 stdlib may import api only', async () => {
-    expect(await lintImport('src/stdlib/a.ts', '../api.js')).toEqual([])
+  it('AC-008 stdlib, adapters and testing reach the engine through sdk.ts only', async () => {
+    for (const file of ['src/stdlib/a.ts', 'src/testing/a.ts', 'src/adapters/sqlite/x/a.ts']) {
+      const up = file.split('/').length === 3 ? '../' : '../../../'
+      expect(await lintImport(file, `${up}sdk.js`)).toEqual([])
+      for (const entry of ['api.js', 'index.js', 'testing.js']) {
+        expect(await lintImport(file, `${up}${entry}`)).toEqual(DENIED)
+      }
+    }
     expect(await lintImport('src/stdlib/a.ts', '../core/b.js')).toEqual(DENIED)
-    expect(await lintImport('src/stdlib/a.ts', '../index.js')).toEqual(DENIED)
   })
 
   it('AC-009 each adapter may import only its own external library', async () => {
@@ -56,6 +61,7 @@ describe('dependency direction', () => {
     ).toEqual([])
     expect(await lintImport('src/adapters/mcp-stdio/a.ts', '../../index.js')).toEqual(DENIED)
     expect(await lintImport('src/core/a.ts', '../api.js')).toEqual(DENIED)
+    expect(await lintImport('src/core/a.ts', '../sdk.js')).toEqual(DENIED)
   })
 
   it('AC-010 no layer may import electron', async () => {
@@ -78,9 +84,35 @@ describe('dependency direction', () => {
     expect(await lintImport('src/core/a.test.ts', '../executor/b.js')).toEqual(DENIED)
   })
 
-  it('api.ts must not import stdlib', async () => {
+  it('api.ts must not import stdlib or the sdk', async () => {
     expect(await lintImport('src/api.ts', './stdlib/b.js')).toEqual(DENIED)
+    expect(await lintImport('src/api.ts', './sdk.js')).toEqual(DENIED)
     expect(await lintImport('src/api.ts', './engine/b.js')).toEqual([])
+  })
+
+  it('the package entry loads no test tooling and no adapter that needs an external library', async () => {
+    for (const denied of [
+      './testing/fake-clock.js',
+      './testing.js',
+      './sdk.js',
+      './adapters/ai-sdk/ai-sdk-provider.js',
+      './adapters/sqlite/sqlite-archive.js',
+      './adapters/mcp-stdio/mcp-stdio.js',
+      './adapters/mcp-http/mcp-http.js',
+    ]) {
+      expect(await lintImport('src/index.ts', denied)).toEqual(DENIED)
+    }
+    expect(await lintImport('src/index.ts', './api.js')).toEqual([])
+    expect(await lintImport('src/index.ts', './stdlib/b.js')).toEqual([])
+    expect(await lintImport('src/index.ts', './adapters/console-logger/console-logger.js')).toEqual(
+      [],
+    )
+  })
+
+  it('the testing entry re-exports the testing toolkit only', async () => {
+    expect(await lintImport('src/testing.ts', './testing/fake-clock.js')).toEqual([])
+    expect(await lintImport('src/testing.ts', './core/b.js')).toEqual(DENIED)
+    expect(await lintImport('src/testing.ts', './index.js')).toEqual(DENIED)
   })
 
   it('AC-016 test files may import the testing toolkit, source files may not', async () => {

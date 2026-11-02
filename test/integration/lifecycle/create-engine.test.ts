@@ -3,23 +3,17 @@ import { describe, expect, it } from 'vitest'
 import { z } from 'zod'
 import {
   adaptHooks,
-  aiSdkProvider,
   compactingMemory,
   createEngine,
   createHookRunner,
-  fakeTool,
   hookRunner,
   tools,
   createMcpHost,
-  fakeMcpServer,
   mcp,
   mcpHost,
   parseMcpConfig,
-  runToEnd,
   defineAgent,
   defineTask,
-  engineFingerprint,
-  fakeModel,
   memoryArchive,
   modelHub,
   skill,
@@ -30,10 +24,18 @@ import {
   standardFallback,
   structured,
   text,
-  type FakeReply,
   type CapabilityHost,
   type RunEvent,
 } from '../../../src/index.js'
+import {
+  fakeTool,
+  fakeMcpServer,
+  runToEnd,
+  fakeModel,
+  type FakeReply,
+} from '../../../src/testing.js'
+import { engineFingerprint } from '../../../src/sdk.js'
+import { aiSdkProvider } from '../../../src/adapters/ai-sdk/ai-sdk-provider.js'
 
 const quiet = { log: () => {} }
 
@@ -336,17 +338,14 @@ describe('createEngine', () => {
     expect(hookRunner().kind).toBe('hook')
   })
 
-  it('AC-022 exports persistence, observability and replay from the package entry', async () => {
+  it('AC-022 exports observability and replay from the package entry, SQLite from its subpath', async () => {
     const entry = await import('../../../src/index.js')
-    for (const name of [
-      'sqliteArchive',
-      'otelExporter',
-      'langfuseExporter',
-      'strictReplay',
-      'regressionReplay',
-    ]) {
+    for (const name of ['otelExporter', 'langfuseExporter', 'strictReplay', 'regressionReplay']) {
       expect(typeof (entry as Record<string, unknown>)[name]).toBe('function')
     }
+    expect(entry).not.toHaveProperty('sqliteArchive')
+    const sqlite = await import('../../../src/adapters/sqlite/sqlite-archive.js')
+    expect(typeof sqlite.sqliteArchive).toBe('function')
   })
 
   it('AC-019 runs through the AI SDK adapter', async () => {

@@ -1,11 +1,10 @@
-// 包入口：公开 API、标准组件、适配器，以及带默认组件的 createEngine（方案 D10）。
+// 包入口：应用 API、标准组件、不依赖外部库的适配器，以及带默认组件的 createEngine（方案 D10）。
+// 依赖外部库的适配器（ai、better-sqlite3、MCP SDK）和测试工具走子路径导出，主入口不加载它们。
 
 import { assembleEngine, createHookRunner, createMcpHost } from './api.js'
 import type { Engine, EngineConfig, HookRunner, McpConnect, McpHost } from './api.js'
 import { consoleLogger } from './adapters/console-logger/console-logger.js'
 import { processExec } from './adapters/hook-process/hook-process.js'
-import { httpConnect } from './adapters/mcp-http/mcp-http.js'
-import { stdioConnect } from './adapters/mcp-stdio/mcp-stdio.js'
 import { completionReview } from './stdlib/checks/completion-review.js'
 import { standardFallback } from './stdlib/delivery/standard-fallback.js'
 import { text } from './stdlib/delivery/output-contracts.js'
@@ -15,9 +14,14 @@ import { standardGuards } from './stdlib/supervision/standard-guards.js'
 
 export * from './api.js'
 
-/** 按传输方式分派到官方 SDK 的 stdio / Streamable HTTP 适配器。 */
-const mcpConnect: McpConnect = (server, opts) =>
-  server.transport.kind === 'stdio' ? stdioConnect(server, opts) : httpConnect(server, opts)
+/**
+ * 按传输方式分派到官方 SDK 的 stdio / Streamable HTTP 适配器。
+ * 第一次连接时才加载：MCP SDK 是可选的 peer 依赖，不用 MCP 的应用不必安装。
+ */
+const mcpConnect: McpConnect = async (server, opts) =>
+  server.transport.kind === 'stdio'
+    ? (await import('./adapters/mcp-stdio/mcp-stdio.js')).stdioConnect(server, opts)
+    : (await import('./adapters/mcp-http/mcp-http.js')).httpConnect(server, opts)
 
 /** 用子进程执行 hook 的 hook 执行器（设计 §8.3）。 */
 export function hookRunner(): HookRunner {
@@ -92,28 +96,6 @@ export { bm25Ranker, tokenize } from './stdlib/exposure/tool-ranker.js'
 export type { RankedTool, ToolCandidate, ToolRanker } from './stdlib/exposure/tool-ranker.js'
 export { compactingMemory, cutIndex } from './stdlib/memory/compacting-memory.js'
 
-// 适配器
+// 适配器（不依赖外部库的；其余见 package.json 的 exports）
 export { consoleLogger } from './adapters/console-logger/console-logger.js'
-export { stdioConnect } from './adapters/mcp-stdio/mcp-stdio.js'
 export { processExec } from './adapters/hook-process/hook-process.js'
-export { sqliteArchive } from './adapters/sqlite/sqlite-archive.js'
-export { aiSdkProvider } from './adapters/ai-sdk/ai-sdk-provider.js'
-export type { AiSdkModelConfig } from './adapters/ai-sdk/ai-sdk-provider.js'
-export { httpConnect } from './adapters/mcp-http/mcp-http.js'
-
-// 测试工具（设计 §13）
-export { archiveStoreContract } from './testing/archive-contract.js'
-export type { ContractCase } from './testing/archive-contract.js'
-export { FakeClock } from './testing/fake-clock.js'
-export { fakeModel } from './testing/fake-model.js'
-export type { FakeModel, FakeReply } from './testing/fake-model.js'
-export { fakeTool } from './testing/fake-tool.js'
-export { assertInvariants, replay, runToEnd } from './testing/run-tools.js'
-export type { RegressionMode } from './testing/run-tools.js'
-export { chaos } from './testing/chaos.js'
-export type { Chaos, ChaosFault } from './testing/chaos.js'
-export { conformance } from './testing/conformance.js'
-export type { ConformanceOptions } from './testing/conformance.js'
-export { fakeMcpServer } from './testing/fake-mcp-server.js'
-export type { FakeMcpServer, FakeMcpTool } from './testing/fake-mcp-server.js'
-export type { FakeTool, FakeToolOptions } from './testing/fake-tool.js'

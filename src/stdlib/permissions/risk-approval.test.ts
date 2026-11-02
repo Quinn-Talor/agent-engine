@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { ComponentCtx, ToolCallView } from '../../api.js'
+import type { ComponentCtx, ToolCallView } from '../../sdk.js'
 import { runInfo } from '../capabilities/prepare.fixture.js'
 import { riskApproval } from './risk-approval.js'
 

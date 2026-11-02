@@ -2,7 +2,7 @@
 // { input, output, cacheRead, cacheWrite }。四项是加法关系：input 为未命中缓存的输入。
 
 import type { LanguageModelUsage, ProviderMetadata } from 'ai'
-import type { NormalizedUsage } from '../../api.js'
+import type { NormalizedUsage } from '../../sdk.js'
 
 const numberAt = (
   metadata: ProviderMetadata | undefined,

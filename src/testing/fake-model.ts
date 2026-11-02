@@ -1,6 +1,6 @@
 // 测试模型（设计 §13）：按脚本回复的模型提供方与端口，可以注入延迟、错误、截断、挂起。
 
-import { ModelCallError, abortError, estimateMessages, estimateText, systemClock } from '../api.js'
+import { ModelCallError, abortError, estimateMessages, estimateText, systemClock } from '../sdk.js'
 import type { Clock } from '../contracts/common.js'
 import type { ModelErrorCode } from '../contracts/errors.js'
 import type {

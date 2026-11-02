@@ -4,7 +4,7 @@
 // 同一回复里重复的工具调用 id 按出现顺序加后缀，保证调用与结果一一配对。
 
 import { jsonSchema, stepCountIs, streamText, wrapLanguageModel, type LanguageModel } from 'ai'
-import { ModelCallError, abortError, systemClock } from '../../api.js'
+import { ModelCallError, abortError, systemClock } from '../../sdk.js'
 import type {
   Clock,
   Delta,
@@ -15,7 +15,7 @@ import type {
   ModelPort,
   ModelProvider,
   ModelResponse,
-} from '../../api.js'
+} from '../../sdk.js'
 import { classifyError } from './errors.js'
 import { cleanLeakedToolMarkup, toSdkMessages } from './messages.js'
 import { reasoningOptions, type ReasoningLevel, type Vendor } from './reasoning.js'

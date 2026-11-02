@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { defineAgent, delegationHost, type Environment } from '../../api.js'
+import { defineAgent, delegationHost, type Environment } from '../../sdk.js'
 import { prepareCtx } from './prepare.fixture.js'
 import { subagent } from './subagent.js'
 

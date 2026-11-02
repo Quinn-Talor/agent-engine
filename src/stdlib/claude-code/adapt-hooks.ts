@@ -15,7 +15,7 @@ import type {
   NoticeProvider,
   PermissionRule,
   RunInfo,
-} from '../../api.js'
+} from '../../sdk.js'
 
 const DEFAULT_TIMEOUT_MS = 10_000
 const INPUT_CHARS = 2000

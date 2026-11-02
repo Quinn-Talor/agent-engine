@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { createMcpHost, hashOf, isToolError, type McpServerSpec, type ToolCtx } from '../../api.js'
+import { createMcpHost, hashOf, isToolError, type McpServerSpec, type ToolCtx } from '../../sdk.js'
 import { FakeClock } from '../../testing/fake-clock.js'
 import { fakeMcpServer, type FakeMcpTool } from '../../testing/fake-mcp-server.js'
 import { mcp } from './mcp.js'

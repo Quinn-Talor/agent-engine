@@ -10,7 +10,7 @@ import {
   type EngineDefaults,
   type ModelHubOptions,
   type ModelProvider,
-} from '../api.js'
+} from '../sdk.js'
 import { fakeModel, type FakeReply } from './fake-model.js'
 import { fakeTool } from './fake-tool.js'
 

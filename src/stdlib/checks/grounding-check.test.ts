@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { Candidate, ComponentCtx, Corpus } from '../../api.js'
+import type { Candidate, ComponentCtx, Corpus } from '../../sdk.js'
 import { runInfo } from '../capabilities/prepare.fixture.js'
 import { obs } from '../supervision/observations.fixture.js'
 import { groundingCheck } from './grounding-check.js'
