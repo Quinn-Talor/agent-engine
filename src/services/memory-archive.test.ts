@@ -6,7 +6,7 @@ import {
   sequence,
   stepStarted,
   toolFinished,
-} from '../core/events.fixture.js'
+} from '../core/log/events.fixture.js'
 import { FakeClock } from '../testing/fake-clock.js'
 import { memoryArchive } from './memory-archive.js'
 

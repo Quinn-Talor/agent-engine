@@ -9,22 +9,26 @@ import type { Environment, EnvironmentConfig } from '../contracts/environment.js
 import { DefinitionError, toolError } from '../contracts/errors.js'
 import type { ArchiveStore, RunEvent } from '../contracts/events.js'
 import type { RunResult, RunSummary } from '../contracts/run.js'
-import { engineFingerprint, environmentFingerprint, isNoticeProvider } from '../core/fingerprint.js'
-import { freezeList, frozenCopy } from '../core/freeze.js'
-import { foldState } from '../core/projections.js'
-import { apply } from '../core/state.js'
-import { normalizeOutput } from '../executor/exec.js'
+import {
+  engineFingerprint,
+  environmentFingerprint,
+  isNoticeProvider,
+} from '../core/definition/fingerprint.js'
+import { freezeList, frozenCopy } from '../core/definition/freeze.js'
+import { foldState } from '../core/log/projections.js'
+import { apply } from '../core/run/state.js'
+import { normalizeOutput } from '../executor/act/exec.js'
 import { createAdmission } from '../services/admission.js'
 import { systemClock } from '../services/clock.js'
-import { delegationHost } from '../services/delegation-host.js'
+import { delegationHost } from '../services/hosts/delegation-host.js'
 import { memoryArchive } from '../services/memory-archive.js'
-import { skillHost } from '../services/skill-host.js'
+import { skillHost } from '../services/hosts/skill-host.js'
 import {
   startRun,
   type EngineRuntime,
   type EnvironmentRuntime,
   type StartedRun,
-} from './run-driver.js'
+} from './run/run-driver.js'
 
 export interface EngineDefaults {
   memory: Memory

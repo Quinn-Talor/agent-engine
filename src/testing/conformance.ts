@@ -292,7 +292,7 @@ function callSamples(): ToolCallView[] {
 
 const isString = (v: unknown): v is string => typeof v === 'string'
 
-// 守卫意见与权限结果按引擎运行时的同一套规则检查（core/component-results.ts），两边不会走样。
+// 守卫意见与权限结果按引擎运行时的同一套规则检查（core/definition/component-results.ts），两边不会走样。
 function assertGuardOpinion(o: GuardOpinion | undefined, label: string) {
   if (o === undefined) return
   const issue = guardOpinionIssue(o)

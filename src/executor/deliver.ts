@@ -16,11 +16,11 @@ import type {
 import type { RunEventBody } from '../contracts/events.js'
 import type { ModelInput, ModelPrice } from '../contracts/model.js'
 import type { Notice } from '../contracts/run.js'
-import { checkResultIssue } from '../core/component-results.js'
-import { budgetState } from '../core/decide.js'
-import { estimateMessages, estimateTools } from '../core/estimate.js'
-import { copyData } from '../core/freeze.js'
-import type { RunState } from '../core/state.js'
+import { checkResultIssue } from '../core/definition/component-results.js'
+import { budgetState } from '../core/supervision/decide.js'
+import { estimateMessages, estimateTools } from '../core/run/estimate.js'
+import { copyData } from '../core/definition/freeze.js'
+import type { RunState } from '../core/run/state.js'
 import { callComponent, failureDetail } from './call-component.js'
 
 const DEFAULT_MAX_REPAIRS = 3
@@ -108,7 +108,7 @@ export function createDelivery(deps: DeliverDeps): Delivery {
     })
 
   /**
-   * 退回前按判定的合并后检查看预算（core/decide.ts）：步数或时间不够时文本交付转兜底、结构化交付停止
+   * 退回前按判定的合并后检查看预算（core/supervision/decide.ts）：步数或时间不够时文本交付转兜底、结构化交付停止
    * （兜底只能产出文本）；token 或费用用完时停止。还有下一步可用时返回 undefined。
    */
   const exhausted = (

@@ -16,8 +16,8 @@ import {
   stepStarted,
   toolFinished,
   type EventBody,
-} from '../core/events.fixture.js'
-import { apply, initial, type RunState } from '../core/state.js'
+} from '../core/log/events.fixture.js'
+import { apply, initial, type RunState } from '../core/run/state.js'
 import { FakeClock } from '../testing/fake-clock.js'
 import { createEvaluator, type EvaluateDeps } from './evaluate.js'
 

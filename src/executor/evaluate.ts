@@ -16,12 +16,12 @@ import type {
 } from '../contracts/component.js'
 import type { BlobRef, RunEventBody } from '../contracts/events.js'
 import type { ModelPrice } from '../contracts/model.js'
-import { budgetGuard } from '../core/budget-guard.js'
-import { guardOpinionIssue } from '../core/component-results.js'
-import { budgetState, decide, type SourcedOpinion } from '../core/decide.js'
-import { stepFacts } from '../core/facts.js'
-import type { RunState, SourcedIntervention } from '../core/state.js'
-import { renderFinding, renderSteering } from '../core/steering.js'
+import { budgetGuard } from '../core/supervision/budget-guard.js'
+import { guardOpinionIssue } from '../core/definition/component-results.js'
+import { budgetState, decide, type SourcedOpinion } from '../core/supervision/decide.js'
+import { stepFacts } from '../core/supervision/facts.js'
+import type { RunState, SourcedIntervention } from '../core/run/state.js'
+import { renderFinding, renderSteering } from '../core/supervision/steering.js'
 import { callComponent, failureDetail } from './call-component.js'
 
 export interface EvaluateDeps {

@@ -10,7 +10,7 @@ import {
   sequence,
   stepStarted,
   toolSnapshot,
-} from '../../../src/core/events.fixture.js'
+} from '../../../src/core/log/events.fixture.js'
 import {
   createEngine,
   defineAgent,

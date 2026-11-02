@@ -11,9 +11,9 @@ import type {
 } from '../contracts/events.js'
 import { SCHEMA_VERSION, type ArchiveStore } from '../contracts/events.js'
 import type { RunSummary } from '../contracts/run.js'
-import { sha256Hex } from '../core/hash.js'
-import { summarize } from '../core/projections.js'
-import { upcastEvent } from '../core/upcast.js'
+import { sha256Hex } from '../core/definition/hash.js'
+import { summarize } from '../core/log/projections.js'
+import { upcastEvent } from '../core/log/upcast.js'
 import { systemClock } from './clock.js'
 
 const DAY_MS = 86_400_000

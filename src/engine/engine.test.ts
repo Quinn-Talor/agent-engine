@@ -17,9 +17,9 @@ import {
   stepStarted,
   toolFinished,
   toolSnapshot,
-} from '../core/events.fixture.js'
-import { checkInvariants } from '../core/invariants.js'
-import { engineFingerprint, environmentFingerprint } from '../core/fingerprint.js'
+} from '../core/log/events.fixture.js'
+import { checkInvariants } from '../core/log/invariants.js'
+import { engineFingerprint, environmentFingerprint } from '../core/definition/fingerprint.js'
 import { memoryArchive } from '../services/memory-archive.js'
 import { FakeClock } from '../testing/fake-clock.js'
 import { fakeModel, type FakeReply } from '../testing/fake-model.js'

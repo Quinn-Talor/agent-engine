@@ -13,19 +13,24 @@ export * from './contracts/run.js'
 export * from './contracts/task.js'
 export * from './contracts/tool.js'
 
-export { canonicalJson, hashOf, inputHash, sha256Hex } from './core/hash.js'
+export { canonicalJson, hashOf, inputHash, sha256Hex } from './core/definition/hash.js'
 export {
   agentFingerprint,
   componentIdentity,
   engineFingerprint,
   environmentFingerprint,
   taskFingerprint,
-} from './core/fingerprint.js'
-export type { ComponentIdentity } from './core/fingerprint.js'
-export { defineAgent, defineTask } from './core/define.js'
-export { estimateMessages, estimateText, estimateTools, nextCalibration } from './core/estimate.js'
-export { layout, segmentToMessage } from './core/layout.js'
-export type { ViewParts } from './core/layout.js'
+} from './core/definition/fingerprint.js'
+export type { ComponentIdentity } from './core/definition/fingerprint.js'
+export { defineAgent, defineTask } from './core/definition/define.js'
+export {
+  estimateMessages,
+  estimateText,
+  estimateTools,
+  nextCalibration,
+} from './core/run/estimate.js'
+export { layout, segmentToMessage } from './core/run/layout.js'
+export type { ViewParts } from './core/run/layout.js'
 export {
   DEFAULT_BUDGET,
   addUsage,
@@ -34,7 +39,7 @@ export {
   emptyUsage,
   initial,
   nextStage,
-} from './core/state.js'
+} from './core/run/state.js'
 export type {
   ActiveBlock,
   EffectiveBudget,
@@ -47,19 +52,19 @@ export type {
   Stage,
   ToolMeta,
   TranscriptEntry,
-} from './core/state.js'
-export { costOf, runCost, stepFacts } from './core/facts.js'
-export { classifyError } from './core/error-class.js'
-export { budgetGuard } from './core/budget-guard.js'
-export { renderFinding, renderSteering } from './core/steering.js'
-export type { SteeringInput } from './core/steering.js'
-export { budgetState, decide } from './core/decide.js'
-export type { BudgetState, SourcedOpinion } from './core/decide.js'
-export { checkInvariants } from './core/invariants.js'
-export type { InvariantViolation } from './core/invariants.js'
-export { REDACTED, redactText, redactValue } from './core/redact.js'
-export { guardOpinionIssue, permitResultIssue } from './core/component-results.js'
-export { upcastEvent } from './core/upcast.js'
+} from './core/run/state.js'
+export { costOf, runCost, stepFacts } from './core/supervision/facts.js'
+export { classifyError } from './core/supervision/error-class.js'
+export { budgetGuard } from './core/supervision/budget-guard.js'
+export { renderFinding, renderSteering } from './core/supervision/steering.js'
+export type { SteeringInput } from './core/supervision/steering.js'
+export { budgetState, decide } from './core/supervision/decide.js'
+export type { BudgetState, SourcedOpinion } from './core/supervision/decide.js'
+export { checkInvariants } from './core/log/invariants.js'
+export type { InvariantViolation } from './core/log/invariants.js'
+export { REDACTED, redactText, redactValue } from './core/log/redact.js'
+export { guardOpinionIssue, permitResultIssue } from './core/definition/component-results.js'
+export { upcastEvent } from './core/log/upcast.js'
 export {
   buildCorpus,
   deliveries,
@@ -69,17 +74,17 @@ export {
   sideEffects,
   summarize,
   transcriptMessages,
-} from './core/projections.js'
-export type { SideEffect } from './core/projections.js'
-export { supervisionStats } from './core/supervision-stats.js'
-export { retrospective } from './core/retrospective.js'
-export { strictReplay } from './core/replay.js'
-export { seededRandom } from './core/random.js'
-export type { StrictReplay } from './core/replay.js'
-export type { RetrospectiveEntry, RunRetrospective } from './core/retrospective.js'
-export type { SupervisionStats } from './core/supervision-stats.js'
-export { buildTrace } from './core/trace.js'
-export type { TraceNode } from './core/trace.js'
+} from './core/log/projections.js'
+export type { SideEffect } from './core/log/projections.js'
+export { supervisionStats } from './core/supervision/supervision-stats.js'
+export { retrospective } from './core/log/retrospective.js'
+export { strictReplay } from './core/log/replay.js'
+export { seededRandom } from './core/run/random.js'
+export type { StrictReplay } from './core/log/replay.js'
+export type { RetrospectiveEntry, RunRetrospective } from './core/log/retrospective.js'
+export type { SupervisionStats } from './core/supervision/supervision-stats.js'
+export { buildTrace } from './core/log/trace.js'
+export type { TraceNode } from './core/log/trace.js'
 
 // 平台服务
 export { memoryArchive } from './services/memory-archive.js'
@@ -87,14 +92,14 @@ export { systemClock } from './services/clock.js'
 export { createBreaker } from './services/breaker.js'
 export type { Breaker } from './services/breaker.js'
 export { modelHub } from './services/model-hub.js'
-export { skillHost } from './services/skill-host.js'
-export type { SkillHost, SkillPackage } from './services/skill-host.js'
-export { delegationHost } from './services/delegation-host.js'
-export { createMcpHost } from './services/mcp-host.js'
-export { createHookRunner } from './services/hook-runner.js'
-export type { HookResult, HookRunner } from './services/hook-runner.js'
-export type { McpHost, McpLease } from './services/mcp-host.js'
-export type { DelegationHost, SubagentSpec } from './services/delegation-host.js'
+export { skillHost } from './services/hosts/skill-host.js'
+export type { SkillHost, SkillPackage } from './services/hosts/skill-host.js'
+export { delegationHost } from './services/hosts/delegation-host.js'
+export { createMcpHost } from './services/hosts/mcp-host.js'
+export { createHookRunner } from './services/hosts/hook-runner.js'
+export type { HookResult, HookRunner } from './services/hosts/hook-runner.js'
+export type { McpHost, McpLease } from './services/hosts/mcp-host.js'
+export type { DelegationHost, SubagentSpec } from './services/hosts/delegation-host.js'
 export type { ModelHubOptions } from './services/model-hub.js'
 export { AdmissionTimeoutError, createAdmission } from './services/admission.js'
 export type { Admission, AdmissionSlot } from './services/admission.js'

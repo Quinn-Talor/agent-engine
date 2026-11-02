@@ -4,7 +4,7 @@ import type { Agent, AgentDef, Deliverable } from '../contracts/agent.js'
 import type { Exposure, Fallback, Memory, OutputContract } from '../contracts/component.js'
 import type { ModelHub, ModelPort, ModelPrice, ModelRef } from '../contracts/model.js'
 import type { Task, TaskDef } from '../contracts/task.js'
-import { defineAgent, defineTask } from '../core/define.js'
+import { defineAgent, defineTask } from '../core/definition/define.js'
 
 export const textOutput = (): OutputContract => ({
   id: 'plain',
