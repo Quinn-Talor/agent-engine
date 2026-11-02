@@ -135,7 +135,7 @@ type CallBlock = { tool: string; inputHash: string; code: string; reason: string
 3. **出错时降级**：守卫出错或超时，视为没有意见；如果守卫声明了 `onError: 'stop'`，就按停止处理，code 为 `guard_error:<id>`。委托人联系不上时，守卫的"等待输入"改为收尾（同样先告知）。
 4. **封路要有强制力**：工具流水线拦截被封住的调用；被封住的调用又被调用，由守卫 3 收尾。
 
-### 3.4 裁决（core/decide.ts，纯函数）
+### 3.4 裁决（core/supervision/decide.ts，纯函数）
 
 - **合并前**：内容过滤 → 停止。
 - **收集意见**，按来源顺序：核心内置 → 意图 → 候选（本步没有工具调用、只有文本，视为完成）→ 任务守卫 → 环境守卫 → 能力守卫 → 标准守卫。
@@ -165,7 +165,7 @@ type CallBlock = { tool: string; inputHash: string; code: string; reason: string
 | 5. 给出口 | 纠偏消息 | 直接作答 / ask_user / report_blocked |
 | 6. 换个视角 | 顾问（可选） | 语义诊断 |
 
-### 4.2 纠偏消息（由核心统一渲染，集中在 `core/steering.ts`）
+### 4.2 纠偏消息（由核心统一渲染，集中在 `core/supervision/steering.ts`）
 
 ```
 [纠偏 · 第 N 步]
@@ -305,13 +305,13 @@ HINT: <守卫的建议>。再调用将收尾
 
 | 模块 | 职责 |
 |---|---|
-| `contracts/guard.ts` | `Guard`、`GuardOpinion`、`CallBlock` 的类型 |
-| `core/facts.ts`、`core/error-class.ts` | 本步发生了什么；错误属于哪一类 |
-| `core/decide.ts` | 核心内置守卫 1–3；合并顺序 |
-| `core/steering.ts` | 纠偏消息和封路信封的渲染。纠偏格式只在这里改，也是实验的变量 |
+| `contracts/component.ts` | `Guard`、`GuardOpinion`、`CallBlock` 的类型 |
+| `core/supervision/facts.ts`、`core/supervision/error-class.ts` | 本步发生了什么；错误属于哪一类 |
+| `core/supervision/decide.ts` | 核心内置守卫 1–3；合并顺序 |
+| `core/supervision/steering.ts` | 纠偏消息和封路信封的渲染。纠偏格式只在这里改，也是实验的变量 |
 | `executor/evaluate.ts` | 并行执行所有守卫；执行规则 1–3 |
-| `stdlib/guards/threshold.ts` | 计数类守卫的辅助函数 |
-| `stdlib/guards/{roadblock,standard,advisor}.ts` | 守卫 4–8 和 10 |
+| `stdlib/supervision/threshold-guard.ts` | 计数类守卫的辅助函数 |
+| `stdlib/supervision/{roadblock,standard-guards,advisor}.ts` | 守卫 4–8 和 10 |
 | `stdlib/capabilities/planning.ts` | 守卫 9 |
 | `executor/deliver.ts` | 交付是否合格（不变） |
 
@@ -319,7 +319,7 @@ HINT: <守卫的建议>。再调用将收尾
 
 - **守卫只能看到 `StepFacts` 和自己的账**，看不到 RunState，也看不到别的守卫。
 - **守卫之间的冲突只由裁决解决**：靠来源顺序和合并顺序。
-- **纠偏的措辞只在 `core/steering.ts` 里**，守卫只提供问题、建议和封住的调用。
+- **纠偏的措辞只在 `core/supervision/steering.ts` 里**，守卫只提供问题、建议和封住的调用。
 - **依赖方向不变**，`eslint.config.js` 不用改。默认守卫仍然在 `index.ts` 里装配。
 - **对外 API 统一**：原来的 `task.conditions`、`environment.rules`、能力返回的 `indicators`、引擎的 `supervision`，统一改为 `guards`。
 
@@ -341,7 +341,7 @@ HINT: <守卫的建议>。再调用将收尾
 | 阶段 | 内容 | 验收门槛 |
 |---|---|---|
 | 1 守卫契约 | 新增 Guard 契约，evaluate 改成执行守卫和规则 1–3；把现有的约束条件、规定包装成守卫。**不改变任何行为** | 现有测试全绿 |
-| 2 纠偏 + 实验 | 实现 `core/steering.ts` 和封路信封；搭建实验框架，跑第 7 节的实验 | 实验报告定出纠偏格式和阈值 |
+| 2 纠偏 + 实验 | 实现 `core/supervision/steering.ts` 和封路信封；搭建实验框架，跑第 7 节的实验 | 实验报告定出纠偏格式和阈值 |
 | 3 替换 | 实现守卫 4–9，按实验结论设定参数；裁决改用新的合并顺序；删除指标、阶梯、playbook、诊断器 | 场景矩阵全过；回归重放的差异清单逐条确认 |
 | 4 收尾 | 守卫 10（顾问）；清理契约；兼容旧日志（upcast）；一致性测试集；统计和复盘；更新设计文档 | typecheck、lint、coverage 全绿 |
 
@@ -365,6 +365,6 @@ HINT: <守卫的建议>。再调用将收尾
 | 结局会有变化：瞬时错误晚一步收尾；模型的完成不再被守卫打断；默认不再做语义诊断 | 回归重放的差异清单逐条确认；需要语义诊断的场景打开顾问 |
 | 防重复副作用误伤"有意重复"的操作 | 工具声明为 `idempotent` 就豁免；实验里专门覆盖这个场景 |
 | 静默推进干扰正常的连续读取 | 阈值靠实验定，可以关闭 |
-| 纠偏消息的效果因模型而异 | 措辞集中在 `core/steering.ts`，按实验结论调整 |
+| 纠偏消息的效果因模型而异 | 措辞集中在 `core/supervision/steering.ts`，按实验结论调整 |
 | 契约是破坏性改动 | 包还没发布，可以接受；旧日志通过 upcast 兼容 |
 | 规则 1 顺延会让运行多走一步 | 最多多一步，并受预算守卫约束 |

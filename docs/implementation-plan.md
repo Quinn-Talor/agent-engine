@@ -30,7 +30,7 @@
 | D7 | 观测导出 | 导出器只把运行事件转换成 OpenTelemetry span、Langfuse observation 的数据结构，发送函数由应用注入 | 不为可选功能引入外部追踪 SDK |
 | D8 | 测试替身与属性测试 | 自写 `FakeModel`、`FakeTool`、`FakeClock`、`FakeMcpServer`；属性测试用固定种子的自写随机组合；AI SDK 适配器测试用 `ai/test` 的模拟模型 | 不为测试引入额外依赖；适配器测试覆盖 SDK 的真实调用路径 |
 | D9 | 门禁基线 | 不在项目仓库提交。用会话临时目录里的影子仓库（`GIT_DIR=<scratchpad>/ckpt.git`，`GIT_WORK_TREE=` 项目根目录）做 feature 检查点：每个 feature 交付后在影子仓库提交一次，`scope-lock`、`coverage` 以影子仓库的上一个检查点为基线 | 遵守"只在用户要求时提交"；两道门禁仍能按单个 feature 判定 |
-| D10 | 公开入口分两层 | `src/api.ts`：除标准组件外的公开 API（定义函数、核心辅助函数、投影、类型）；`src/index.ts`：重新导出 `api.ts`、标准组件、适配器，并提供带默认组件的 `createEngine` | 设计 §14 规定 `engine/` 不能依赖 `stdlib/`，而引擎的默认记忆、默认监督、Agent 的默认交付物与工具呈现都是标准组件；默认值只能在最外层装配。`stdlib/`、`adapters/`、`testing/` 只 import `api.ts` 和 `contracts/`，没有循环依赖 |
+| D10 | 公开入口分层 | `src/api.ts`：应用 API（定义函数、契约与类型、平台服务、投影与重放）；`src/sdk.ts`：组件作者 API（`api.ts` 加核心函数与平台机制，子路径 `agent-engine/sdk`）；`src/index.ts`：重新导出 `api.ts`、标准组件、不依赖外部库的适配器，并提供带默认组件的 `createEngine`；`src/testing.ts`：测试工具（`agent-engine/testing`）；依赖外部库的适配器各有子路径（设计 §14） | 设计 §14 规定 `engine/` 不能依赖 `stdlib/`，而引擎的默认记忆、默认监督、Agent 的默认交付物与工具呈现都是标准组件；默认值只能在最外层装配。`stdlib/`、`adapters/`、`testing/` 只 import `sdk.ts` 和 `contracts/`，没有循环依赖；核心函数不进包入口，免得内部细节变成对应用的承诺 |
 | D11 | 消息类型 | `contracts/` 自定义 `ModelMessage` 及各类 part，结构与 AI SDK 的消息兼容；由 AI SDK 适配器做转换 | `contracts/` 只允许依赖 `zod`（设计 §14） |
 | D12 | 组件取用宿主 | `ComponentCtx` 新增 `host<T>(kind)`（与 `PrepareCtx.host` 相同）；`record(name, fn, opts?)` 新增可选 `opts.kind: 'record' \| 'hook'` | `adaptHooks` 产出的须知、权限、规定、验收在执行时要经 `hookRunner` 运行 hook，并记为 `external_call` 的 `kind: 'hook'`（设计 §6.2、§8.3）；设计的 `ComponentCtx` 没有取宿主的途径。两处都是新增可选字段，符合契约"只增不改"（§4.6） |
 | D14 | 组件配置进入指纹 | `Component`、`Capability` 新增可选 `config?: JsonValue`：组件工厂把可序列化的参数放进去；函数类参数不进入 | 设计 §6.4 要求指纹包含组件的"配置哈希"，设计的 `Component` 只有 id、版本、模式，没有配置的来源。新增可选字段，符合"只增不改" |
@@ -68,35 +68,7 @@
 
 ## 4. 目录
 
-仓库根目录即包根目录，`src/` 对应设计 §14 的 `src/agent-engine/`：
-
-```
-src/
-  api.ts         公开 API（不含标准组件）
-  index.ts       包入口：api.ts + 标准组件 + 适配器 + 带默认组件的 createEngine
-  contracts/     业务对象与事件契约；全部组件接口；错误码
-  core/          纯函数：流程状态机、视图布局、观察、判定、不变量、输入哈希、指纹、估算器
-  executor/      执行器：受理、准备、组装、推理、行动、评估、交付、结束、取消、限额
-  services/      平台服务：模型库、熔断、准入、能力宿主、运行档案
-  engine/        装配根：createEngine、执行环境、运行句柄、健康状态
-  stdlib/        标准组件
-  adapters/      ai-sdk、sqlite、mcp-stdio、mcp-http、hook-process、console-logger
-  testing/       测试替身、回放、不变量断言、一致性测试、故障注入
-```
-
-| 目录 | 允许 import |
-|---|---|
-| `contracts/` | `zod` |
-| `core/` | `contracts/`、`node:crypto` |
-| `executor/` | `core/`、`contracts/` |
-| `services/` | `contracts/`、`core/`（只用哈希与指纹） |
-| `engine/` | `executor/`、`services/`、`core/`、`contracts/` |
-| `api.ts` | `engine/`、`services/`（平台服务的工厂，设计 §12.2）、`core/`、`contracts/` |
-| `stdlib/`、`testing/` | `api.ts`、`contracts/`、`node:*` |
-| `adapters/` | `api.ts`、`contracts/`、`node:*`，以及各自对应的那一个外部库 |
-| `index.ts` | 全部 |
-
-规则由 eslint `no-restricted-imports` 强制。`services/` 允许用 `core/` 的哈希函数，是对设计 §14 的细化：MCP 连接池按服务器规格的指纹复用连接（§8.3），指纹算法只能有一份。
+目录结构、包的子路径和依赖方向见设计 §14。精确的层间依赖规则只写在 `eslint.config.js` 的依赖方向段，由 lint 强制、`test/arch/boundaries.test.ts` 锁定；这里不再另抄依赖表，避免几份文档各自过时。
 
 ---
 

@@ -47,7 +47,7 @@
 |---|---|
 | R1 | 每个对象、每个配置块，都能用一句业务语言说清"它是什么" |
 | R2 | 同一块里的东西服务同一个职责，并且一起变化 |
-| R3 | 同一个槽位最多两个来源，并且来源有业务含义（平台 / 业务、工单 / 组织） |
+| R3 | 同一个槽位最多两个来源，并且来源有业务含义（平台 / 业务、工单 / 组织）。唯一的例外是守卫：监督要同时看工单、组织、能力和平台四方的要求，四个来源按固定顺序收集、按固定优先级合并（§3.10），不靠来源多少决定结果 |
 | R4 | 不按技术阶段组织配置；流程只是执行视图 |
 | R5 | 策略跟着拥有它的对象走：韧性跟依赖走，限额跟拥有者走 |
 | R6 | 关系到不变量的东西不开放 |
@@ -1624,6 +1624,8 @@ Agent 和任务的定义见 §4.7。
 
 ## 13. 测试体系（`testing/`）
 
+测试工具从子路径 `agent-engine/testing` 导入，不在包入口里（§14）。
+
 | 工具 | 用途 |
 |---|---|
 | `FakeModel` / `FakeTool` / `FakeClock` / `FakeMcpServer` | 用脚本模拟模型、工具、时间和 MCP 服务器，可以注入延迟、错误、截断、超时、断连 |
@@ -1651,27 +1653,46 @@ Agent 和任务的定义见 §4.7。
 ## 14. 目录与依赖
 
 ```
-src/agent-engine/
-  index.ts       公开入口：createEngine、defineAgent、defineTask、类型
-  contracts/     业务对象与事件契约；全部组件接口
-  core/          纯函数：流程状态机、视图布局、观察、判定、不变量、输入哈希、估算器
-  executor/      执行器：组装、行动（工具流水线）、评估、交付
-  services/      平台服务：模型库、能力宿主、运行档案、准入
-  engine/        装配根：服务装配、运行机制装配、执行环境创建、健康状态；
-                 运行驱动（步循环、推理、取消与截止、子运行、订阅与通知、结果与结束）、受理、准备、
-                 运行上下文、血缘与子运行限额、回归重放
-  stdlib/        标准组件
-  adapters/      ai-sdk、sqlite、mcp-stdio、mcp-http、hook-process、console-logger
-  testing/       fakes、回放、不变量断言、一致性测试、故障注入
+src/
+  index.ts       包入口 agent-engine：应用 API + 标准组件 + 不依赖外部库的适配器 + 带默认组件的 createEngine
+  api.ts         应用 API：业务对象与契约、定义函数、平台服务、引擎装配、读运行日志的投影与重放
+  sdk.ts         组件作者 API agent-engine/sdk：应用 API + 实现组件、适配器、运行档案用的核心函数与平台机制
+  testing.ts     测试工具 agent-engine/testing
+  contracts/     业务对象与事件契约；全部组件接口；MCP 与 hook 端口
+  core/          纯函数，按领域分组
+    run/           流程状态机、视图布局、估算器、种子随机数
+    supervision/   观察（事实）、判定、纠偏消息、预算守卫、错误类别、监督统计
+    log/           投影、trace、复盘、不变量、重放、事件升级、脱敏
+    definition/    定义校验、指纹、冻结、稳定哈希、组件返回值校验
+  executor/      各环节的效果：compose/（组装）、act/（工具流水线与权限）、评估、交付、组件调用
+  services/      引擎持有、跨运行共享的机制：模型库、准入、熔断；hosts/（MCP 连接池、skill、委托、hook）；
+                 进程内的默认实现（系统时钟、内存档案）
+  engine/        装配根与回归重放；run/（运行驱动、受理、准备、取消与截止、子运行、订阅与通知、结果、运行上下文、血缘）
+  stdlib/        标准组件，按槽位分组；claude-code/ 放 Claude Code 格式的解析与 hook 适配
+  adapters/      依赖外部库或外部进程的端口实现：ai-sdk、sqlite、mcp-stdio、mcp-http、hook-process、console-logger
+  testing/       测试替身、运行与断言、一致性测试、故障注入、存储契约测试
+test/
+  arch/          依赖方向、项目文档与仓库配置的一致性
+  integration/   引擎级测试，按主题分组：lifecycle、supervision、mcp、components
 ```
 
-| 目录 | 允许的依赖 |
-|---|---|
-| `contracts/` | 无（只有类型和 `zod`） |
-| `core/` | `contracts/`、`node:crypto`；不做 I/O，不读时钟 |
-| `executor/` | `core/`、`contracts/` |
-| `services/` | `contracts/` |
-| `engine/` | `executor/`、`services/`、`core/`、`contracts/` |
-| `stdlib/`、`adapters/`、`testing/` | 公开入口和 `contracts/`；每个适配器只引入它对应的那一个外部库 |
+单元测试与源文件同目录（`<名称>.test.ts`）；只被测试使用的构造放在 `*.fixture.ts`，构建和覆盖率都排除。
 
-整个包不 import `electron`、应用代码和界面代码，有独立的 tsconfig，可以在主进程、独立工作进程、命令行脚本和 vitest 中运行。
+**依赖方向**：`contracts ← core ← executor ← engine`，`services` 只被 `engine` 和入口使用；`stdlib/`、`adapters/`、`testing/` 只经 `sdk.ts` 取用引擎能力；包入口不带测试工具，也不静态加载依赖外部库的适配器。精确的规则只写在 `eslint.config.js` 的依赖方向段并由 lint 强制，`test/arch/boundaries.test.ts` 锁定行为；其他文档不再另抄依赖表。
+
+**放 `services/` 还是 `adapters/`**：依赖外部库或外部进程（含标准输出）的端口实现放 `adapters/`；引擎自带、在进程内就能完成的默认实现（系统时钟、内存档案）放 `services/`，因为 services 自己的工厂也拿它们作默认值。
+
+**包的子路径**：
+
+| 子路径 | 内容 | 另外安装 |
+|---|---|---|
+| `agent-engine` | 应用 API、标准组件、`createEngine`、`mcpHost`（第一次连接时才加载 MCP 适配器）、`hookRunner`、`consoleLogger` | 用 MCP 时装 `@modelcontextprotocol/sdk` |
+| `agent-engine/sdk` | 组件作者 API | — |
+| `agent-engine/testing` | 测试工具（§13） | — |
+| `agent-engine/adapters/ai-sdk` | `aiSdkProvider` | `ai` |
+| `agent-engine/adapters/sqlite` | `sqliteArchive` | `better-sqlite3` |
+| `agent-engine/adapters/mcp-stdio`、`agent-engine/adapters/mcp-http` | `stdioConnect`、`httpConnect` | `@modelcontextprotocol/sdk` |
+
+`ai`、`@modelcontextprotocol/sdk`、`better-sqlite3` 都是可选的 peer 依赖：应用和引擎用同一份，模型实例和连接对象不会因为装了两份而对不上。
+
+整个包不 import `electron`、应用代码和界面代码，可以在主进程、独立工作进程、命令行脚本和 vitest 中运行。

@@ -22,7 +22,13 @@ npm install
 npm run build
 ```
 
-应用里另外安装 `zod`。模型经 [Vercel AI SDK](https://ai-sdk.dev) 接入，厂商包由应用自己安装，例如 `@ai-sdk/anthropic`。持久化的运行档案用 SQLite，需要另外安装可选的 peer 依赖 `better-sqlite3`；不装时引擎使用内存档案。
+应用里另外安装 `zod`。外部库都是可选的 peer 依赖，用到哪个装哪个，应用和引擎共用同一份：
+
+- 模型经 [Vercel AI SDK](https://ai-sdk.dev) 接入：安装 `ai` 和厂商包（例如 `@ai-sdk/anthropic`），从 `agent-engine/adapters/ai-sdk` 导入 `aiSdkProvider`。
+- 持久化的运行档案用 SQLite：安装 `better-sqlite3`，从 `agent-engine/adapters/sqlite` 导入 `sqliteArchive`；不装时引擎使用内存档案。
+- 接 MCP 服务器：安装 `@modelcontextprotocol/sdk`；包入口的 `mcpHost()` 第一次连接时才加载它。
+
+包的子路径：`agent-engine`（应用 API、标准组件、`createEngine`）、`agent-engine/sdk`（实现组件或适配器时用的核心函数）、`agent-engine/testing`（测试工具），以及上面的适配器。
 
 ## 快速开始
 
@@ -30,16 +36,16 @@ npm run build
 import { anthropic } from '@ai-sdk/anthropic'
 import { z } from 'zod'
 import {
-  aiSdkProvider,
   createEngine,
   defineAgent,
   defineTask,
   intents,
   modelHub,
-  sqliteArchive,
   tools,
   type ToolDef,
 } from 'agent-engine'
+import { aiSdkProvider } from 'agent-engine/adapters/ai-sdk'
+import { sqliteArchive } from 'agent-engine/adapters/sqlite'
 
 // 1. 引擎：平台服务（模型库、运行档案……）。记忆、监督与交付默认使用标准组件（交付带完成审查）。
 const provider = aiSdkProvider({
@@ -145,11 +151,11 @@ for (const summary of await engine.interrupted()) {
 | 插件       | `parsePlugin`、`parseSkill`、`parseMcpConfig`、`adaptHooks`                      |
 | 复盘与观测 | `retrospect.brief`、`otelExporter`、`langfuseExporter`                           |
 
-适配器把外部依赖接到端口上：`aiSdkProvider`（模型）、`sqliteArchive`（运行档案）、`mcpHost`（MCP 连接池，按服务器配置走 stdio 或 Streamable HTTP）、`hookRunner`（hook 进程）、`consoleLogger`（诊断日志）。
+适配器把外部依赖接到端口上：`aiSdkProvider`（模型，`agent-engine/adapters/ai-sdk`）、`sqliteArchive`（运行档案，`agent-engine/adapters/sqlite`）、`mcpHost`（MCP 连接池，按服务器配置走 stdio 或 Streamable HTTP）、`hookRunner`（hook 进程）、`consoleLogger`（诊断日志）。
 
 ## 测试工具
 
-`agent-engine` 同时导出测试工具，应用和组件作者可以直接使用：
+测试工具从 `agent-engine/testing` 导入，应用和组件作者可以直接使用：
 
 | 工具                                                         | 用途                                                                                                                 |
 | ------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------- |
@@ -164,7 +170,7 @@ for (const summary of await engine.interrupted()) {
 一致性测试集与契约测试返回用例列表，交给你自己的测试框架：
 
 ```ts
-import { conformance } from 'agent-engine'
+import { conformance } from 'agent-engine/testing'
 
 for (const c of conformance.memory(myMemory)) it(c.name, () => c.run())
 ```
