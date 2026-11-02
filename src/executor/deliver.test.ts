@@ -635,4 +635,22 @@ describe('fallbackPrompt', () => {
     expect(fallbackPrompt(withDefault, 'stall', true, [])).toBe('r\n\n已执行的副作用：\n无')
     expect(fallbackPrompt(fallback, 'stall', true, [])).toBe('固定兜底文本\n\n已执行的副作用：\n无')
   })
+
+  it('F24 AC-004 puts the current task first and keeps the text unchanged without a goal', () => {
+    expect(fallbackPrompt(fallback, 'repeat', true, [], ' 查茅台净利润 ')).toBe(
+      '本次任务：查茅台净利润\n只针对本次任务作答：之前对话里的内容只是背景，不要再汇报。\n\n' +
+        '重复了，请提问。\n\n已执行的副作用：\n无',
+    )
+    expect(fallbackPrompt(fallback, 'repeat', true, [], '  ')).toBe(
+      '重复了，请提问。\n\n已执行的副作用：\n无',
+    )
+  })
+
+  it('F24 AC-005 tells the model the goal of this run on the fallback path', async () => {
+    const s = setup({}, { run: { ...run, task: { goal: 'g' } } })
+    await s.delivery.deliver(finalized('repeat'))
+    const last = s.generated[0]!.input.messages.at(-1)!
+    expect(last.role).toBe('user')
+    expect(String(last.content).startsWith('本次任务：g\n')).toBe(true)
+  })
 })

@@ -124,6 +124,19 @@ describe('checkPermission', () => {
       deps({ rules: [rule('a', ask('写文件', 'low'))], approver: approver({ approved: false }) }),
     )
     expect(result).toMatchObject({ allowed: false, error: { code: 'USER_DENIED' } })
+    expect(result.allowed || result.error.hint).toContain('不要换工具或换写法')
+  })
+
+  it('F24 AC-001 tells the model not to work around a rule that denies', async () => {
+    const denied = await checkPermission(call, deps({ rules: [rule('b', { deny: '插件不允许' })] }))
+    expect(denied).toMatchObject({ allowed: false, error: { code: 'PERMISSION_DENIED' } })
+    expect(denied.allowed || denied.error.hint).toContain('不要换工具或换写法')
+    const failing = await checkPermission(
+      call,
+      deps({ rules: [rule('b', { deny: '出错', unavailable: true })] }),
+    )
+    expect(failing).toMatchObject({ allowed: false, error: { code: 'PERMISSION_UNAVAILABLE' } })
+    expect(failing.allowed || failing.error.hint).toBeUndefined()
   })
 
   it.each([

@@ -45,7 +45,11 @@ export type PermissionOutcome = { events: RunEventBody[] } & (
   { allowed: true } | { allowed: false; error: ToolErrorEnvelope }
 )
 
-const USER_DENIED_HINT = '不要重试，换一种做法或向委托人说明'
+// 规则或委托人拒绝后不能引导"换个做法"：实测模型据此用 bash 写了 hook 禁止的文件（F24）。
+const POLICY_DENIED_HINT =
+  '这是规则的限制：不要重试，也不要换工具或换写法去做同一件事；向委托人说明被拒绝的原因，或只做不受限制的部分'
+const USER_DENIED_HINT =
+  '委托人拒绝了这个操作：不要重试，也不要换工具或换写法去做同一件事；改做其他部分，或向委托人说明'
 const APPROVAL_FAILED_HINT =
   '这个操作没有得到审批：不要反复请求，改用其他做法，或说明需要委托人审批'
 
@@ -109,7 +113,7 @@ export async function checkPermission(
       events,
       allowed: false,
       error: firm
-        ? toolError('PERMISSION_DENIED', `权限拒绝：${firm.reason}`)
+        ? toolError('PERMISSION_DENIED', `权限拒绝：${firm.reason}`, POLICY_DENIED_HINT)
         : toolError('PERMISSION_UNAVAILABLE', `权限拒绝：${denies[0]!.reason}`),
     }
   }

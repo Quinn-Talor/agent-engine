@@ -12,11 +12,13 @@ interface CallRecord {
   blocked: boolean
 }
 
-/** 按错误给建议：参数错就修参数，被拒绝或没权限就别重试，暂时不可用就别用相同输入重试。 */
+/** 按错误给建议：参数错就修参数，被拒绝或没权限就别重试、也别换做法绕过，暂时不可用就别用相同输入重试。 */
 function failureSuggest(code: string, deterministic: boolean): string {
   if (code === 'INVALID_INPUT') return '按错误信息修正参数后再调用：输入不同就不受封路影响'
-  if (code === 'PERMISSION_DENIED') return '没有权限，不要重试；改用其他做法'
-  if (code === 'USER_DENIED') return '委托人拒绝了这个操作，不要重试；改用其他做法'
+  if (code === 'PERMISSION_DENIED')
+    return '被规则拒绝：不要重试，也不要换工具或换写法去做同一件事；向委托人说明原因，或只做不受限制的部分'
+  if (code === 'USER_DENIED')
+    return '委托人拒绝了这个操作：不要重试，也不要换工具或换写法去做同一件事；改做其他部分，或询问委托人'
   if (code.startsWith('SPAWN_')) return '子任务无法启动；自己完成，或调整委托方式'
   return deterministic
     ? '换一种做法，或改用其他工具'

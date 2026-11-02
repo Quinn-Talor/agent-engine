@@ -68,11 +68,17 @@ export function fallbackPrompt(
   code: string,
   reachable: boolean,
   sideEffects: readonly string[],
+  goal?: string,
 ): string {
   const entry = fallback.instructions[code] ?? fallback.instructions['*']
   const instruction = entry ? (reachable ? entry.reachable : entry.unreachable) : fallback.fixedText
   const list = sideEffects.length > 0 ? sideEffects.map((s) => `- ${s}`).join('\n') : '无'
-  return `${instruction}\n\n已执行的副作用：\n${list}`
+  const body = `${instruction}\n\n已执行的副作用：\n${list}`
+  // 视图里有会话历史；不点明本次任务时，模型会把前几轮也一起汇报（F24）。
+  const task = goal?.trim()
+  return task
+    ? `本次任务：${task}\n只针对本次任务作答：之前对话里的内容只是背景，不要再汇报。\n\n${body}`
+    : body
 }
 
 export function createDelivery(deps: DeliverDeps): Delivery {
@@ -313,6 +319,7 @@ export function createDelivery(deps: DeliverDeps): Delivery {
       code,
       deps.run.environment.principalReachable,
       deps.sideEffects(),
+      deps.run.task.goal,
     )
     const withPrompt = (view: ModelInput): ModelInput => ({
       ...view,
