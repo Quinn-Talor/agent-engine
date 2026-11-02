@@ -9,7 +9,7 @@ import {
   memoryArchive,
   modelHub,
   tools,
-} from './index.js'
+} from '../../../src/index.js'
 
 const quiet = { log: () => {} }
 type Replies = Parameters<typeof fakeModel>[0]['replies']

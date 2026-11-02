@@ -10,7 +10,7 @@ import {
   modelHub,
   type HookResult,
   type HookRunner,
-} from './index.js'
+} from '../../../src/index.js'
 
 describe('cancellation reaches components', () => {
   it('AC-015 aborts a running hook when the run is cancelled', async () => {

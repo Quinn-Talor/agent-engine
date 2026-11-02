@@ -10,7 +10,7 @@ import {
   sequence,
   stepStarted,
   toolSnapshot,
-} from './core/events.fixture.js'
+} from '../../../src/core/events.fixture.js'
 import {
   createEngine,
   defineAgent,
@@ -19,7 +19,7 @@ import {
   modelHub,
   sqliteArchive,
   type RunEvent,
-} from './index.js'
+} from '../../../src/index.js'
 
 const quiet = { log: () => {} }
 const dirs: string[] = []

@@ -25,7 +25,7 @@ import {
   type Guard,
   type ModelInput,
   type RunEvent,
-} from './index.js'
+} from '../../src/index.js'
 
 const SEEDS = Array.from({ length: 60 }, (_, i) => i + 1)
 const MAX_TICKS = 400

@@ -1,8 +1,11 @@
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 
 // 项目规范（vibe/project/）与仓库实际配置保持一致，防止文档随时间漂移。
-const read = (path: string) => readFileSync(new URL(`../${path}`, import.meta.url), 'utf8')
+// vibe/ 不进版本库：新克隆或 CI 里没有这个目录时跳过。
+const root = new URL('../../', import.meta.url)
+const read = (path: string) => readFileSync(new URL(path, root), 'utf8')
+const hasProjectDocs = existsSync(new URL('vibe/project/', root))
 
 function section(doc: string, heading: string): string {
   const start = doc.indexOf(`\n${heading}\n`)
@@ -16,7 +19,7 @@ function commandNames(text: string): string[] {
   return [...text.matchAll(/`npm (?:run ([\w:-]+)|(test))[^`]*`/g)].map((m) => m[1] ?? m[2])
 }
 
-describe('project docs', () => {
+describe.skipIf(!hasProjectDocs)('project docs', () => {
   it('AC-011 every command in overview exists in package.json scripts', () => {
     const scripts = Object.keys(JSON.parse(read('package.json')).scripts as Record<string, string>)
     const names = commandNames(section(read('vibe/project/overview.md'), '## 常用命令'))

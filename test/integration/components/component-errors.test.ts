@@ -20,7 +20,7 @@ import {
   type Memory,
   type NoticeProvider,
   type RunResult,
-} from './index.js'
+} from '../../../src/index.js'
 
 const sys = { role: 'system' as const, parts: [{ type: 'text' as const, text: '你是助手' }] }
 const input = [{ role: 'user' as const, parts: [{ type: 'text' as const, text: '你好' }] }]

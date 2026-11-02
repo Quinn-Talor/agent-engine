@@ -10,7 +10,7 @@ import { emptyRunUsage } from '../core/state.js'
 import { FakeClock } from '../testing/fake-clock.js'
 import { fakeTool } from '../testing/fake-tool.js'
 import { act, type ActDeps, type ToolCallRequest } from './act.js'
-import { Mutex } from './permissions.js'
+import { Mutex } from './mutex.js'
 import { prepareTool, type PreparedTool } from './tools.js'
 
 const run: RunInfo = {

@@ -17,7 +17,7 @@ import {
   type ComponentCtx,
   type ContractCase,
   type HookExecResult,
-} from './index.js'
+} from '../../../src/index.js'
 
 const exitWith = (result: Partial<HookExecResult>) => {
   const runner = createHookRunner({

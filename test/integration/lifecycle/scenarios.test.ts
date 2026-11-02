@@ -27,7 +27,7 @@ import {
   type Guard,
   type ModelMessage,
   type RunEvent,
-} from './index.js'
+} from '../../../src/index.js'
 
 const quiet = { log: () => {} }
 const userText = (text: string) => ({

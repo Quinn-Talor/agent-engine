@@ -11,7 +11,7 @@ import {
   mcp,
   memoryArchive,
   modelHub,
-} from './index.js'
+} from '../../../src/index.js'
 
 const VALID_TOOL_NAME = /^[A-Za-z0-9_-]{1,64}$/
 const quiet = { log: () => {} }

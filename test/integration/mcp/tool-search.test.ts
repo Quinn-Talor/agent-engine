@@ -11,7 +11,7 @@ import {
   memoryArchive,
   modelHub,
   type RunEvent,
-} from './index.js'
+} from '../../../src/index.js'
 
 const quiet = { log: () => {} }
 

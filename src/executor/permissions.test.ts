@@ -10,7 +10,8 @@ import type {
 } from '../contracts/component.js'
 import type { ToolCallView } from '../contracts/tool.js'
 import { FakeClock } from '../testing/fake-clock.js'
-import { Mutex, checkPermission, type PermissionDeps } from './permissions.js'
+import { Mutex } from './mutex.js'
+import { checkPermission, type PermissionDeps } from './permissions.js'
 
 const run: RunInfo = {
   runId: 'r1',

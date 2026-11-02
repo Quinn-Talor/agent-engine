@@ -21,7 +21,7 @@ import {
   type PermissionRule,
   type RunEvent,
   type Segment,
-} from './index.js'
+} from '../../../src/index.js'
 
 const sys = (text: string): Segment => ({ role: 'system', parts: [{ type: 'text', text }] })
 const user = (text: string): Segment => ({ role: 'user', parts: [{ type: 'text', text }] })

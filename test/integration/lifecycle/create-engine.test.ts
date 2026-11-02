@@ -33,7 +33,7 @@ import {
   type FakeReply,
   type CapabilityHost,
   type RunEvent,
-} from './index.js'
+} from '../../../src/index.js'
 
 const quiet = { log: () => {} }
 
@@ -337,7 +337,7 @@ describe('createEngine', () => {
   })
 
   it('AC-022 exports persistence, observability and replay from the package entry', async () => {
-    const entry = await import('./index.js')
+    const entry = await import('../../../src/index.js')
     for (const name of [
       'sqliteArchive',
       'otelExporter',

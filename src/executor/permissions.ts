@@ -15,17 +15,7 @@ import type { RunEventBody } from '../contracts/events.js'
 import type { ToolCallView } from '../contracts/tool.js'
 import { permitResultIssue } from '../core/component-results.js'
 import { callComponent, failureDetail } from './call-component.js'
-
-/** 审批串行排队（设计 §3.14）。 */
-export class Mutex {
-  private tail: Promise<unknown> = Promise.resolve()
-
-  run<T>(fn: () => Promise<T>): Promise<T> {
-    const result = this.tail.then(fn, fn)
-    this.tail = result.catch(() => undefined)
-    return result
-  }
-}
+import type { Mutex } from './mutex.js'
 
 export interface PermissionDeps {
   rules: readonly PermissionRule[]
