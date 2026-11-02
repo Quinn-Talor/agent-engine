@@ -1655,9 +1655,11 @@ src/agent-engine/
   index.ts       公开入口：createEngine、defineAgent、defineTask、类型
   contracts/     业务对象与事件契约；全部组件接口
   core/          纯函数：流程状态机、视图布局、观察、判定、不变量、输入哈希、估算器
-  executor/      执行器：受理、准备、组装、推理、行动（工具流水线）、评估、交付、结束、取消、限额
+  executor/      执行器：组装、行动（工具流水线）、评估、交付
   services/      平台服务：模型库、能力宿主、运行档案、准入
-  engine/        装配根：服务装配、运行机制装配、执行环境创建、健康状态
+  engine/        装配根：服务装配、运行机制装配、执行环境创建、健康状态；
+                 运行驱动（步循环、推理、取消与截止、子运行、订阅与通知、结果与结束）、受理、准备、
+                 运行上下文、血缘与子运行限额、回归重放
   stdlib/        标准组件
   adapters/      ai-sdk、sqlite、mcp-stdio、mcp-http、hook-process、console-logger
   testing/       fakes、回放、不变量断言、一致性测试、故障注入
