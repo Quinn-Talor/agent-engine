@@ -27,7 +27,7 @@ import {
   type RunEvent,
 } from './index.js'
 
-const SEEDS = Array.from({ length: 40 }, (_, i) => i + 1)
+const SEEDS = Array.from({ length: 60 }, (_, i) => i + 1)
 const MAX_TICKS = 400
 const CHILD_TICKS = 50
 const LONG = '数据'.repeat(800)
@@ -167,7 +167,7 @@ const textContract = () => ({
       : { ok: false as const, issues: ['交付文本为空'], hint: '请给出回答' },
 })
 
-/** 场景覆盖：每类情况在 40 个种子里至少出现一次，否则生成器太弱。 */
+/** 场景覆盖：每类情况在 60 个种子里至少出现一次，否则生成器太弱（F25 后重复写操作较少收尾，40 个覆盖不到兜底）。 */
 const COVERAGE = [
   'parallel_tools',
   'tool_error',

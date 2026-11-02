@@ -57,6 +57,8 @@ describe('roadblock', () => {
         code: 'failure_streak',
         reason: '已失败 2 次（TOOL_TIMEOUT）',
         suggest: '暂时不可用，不要用相同输入重试；改用其他工具，或基于已有信息作答',
+
+        clearOnChange: true,
       },
     ])
   })
@@ -108,6 +110,7 @@ describe('roadblock', () => {
         code: 'repeat',
         reason: '连续 2 次返回相同结果',
         suggest: '结果没有变化，不要再用相同输入调用；基于已有结果决定下一步',
+        clearOnChange: true,
       },
     ])
   })
@@ -132,6 +135,7 @@ describe('roadblock', () => {
         code: 'repeat',
         reason: '有副作用的操作已用相同输入成功执行 2 次',
         suggest: '不要重复执行；需要结果时引用上一次的输出',
+        clearOnChange: true,
       },
     ])
     expect(opinions[2]).toBeUndefined()
@@ -169,5 +173,52 @@ describe('roadblock', () => {
     const one = tool({ name: 'read', inputHash: 'h1', outputHash: 'o1' })
     const two = tool({ name: 'read', inputHash: 'h2', outputHash: 'o1' })
     expect(await run(one, two)).toEqual([undefined, undefined])
+  })
+
+  it('F25 AC-001 marks blocks that depend on the environment', async () => {
+    const [failure] = await run(
+      failed({ name: 'run', errorCode: 'TOOL_FAILED', errorClass: 'deterministic' }),
+    )
+    expect(blocksOf(failure)[0]).toMatchObject({ tool: 'run', clearOnChange: true })
+    const same = tool({ name: 'status', outputHash: 'same' })
+    const opinions = await run(same, same)
+    expect(blocksOf(opinions[1])[0]).toMatchObject({ code: 'repeat', clearOnChange: true })
+  })
+
+  it('F25 AC-002 leaves blocks that do not depend on the environment unmarked', async () => {
+    const unknown = failed({
+      name: 'send',
+      effect: 'side_effect',
+      errorCode: 'TOOL_TIMEOUT',
+      possiblyExecuted: true,
+    })
+    const opinions = [
+      ...(await run(unknown)),
+      ...(await run(failed({ errorCode: 'SPAWN_LIMIT', errorClass: 'deterministic' }))),
+      ...(await run(failed({ errorCode: 'INVALID_INPUT', errorClass: 'deterministic' }))),
+    ]
+    for (const o of opinions.filter((x) => x !== undefined)) {
+      expect(blocksOf(o)[0]!.clearOnChange).toBeUndefined()
+    }
+    expect(opinions.filter((x) => x !== undefined)).toHaveLength(3)
+  })
+
+  it('F25 AC-003 counts a call again after a write succeeded', async () => {
+    const boom = failed({ name: 'run', errorCode: 'TOOL_FAILED', errorClass: 'deterministic' })
+    const fix = tool({ name: 'fix', inputHash: 'h9', effect: 'side_effect' })
+    const opinions = await run(boom, fix, boom)
+    expect(blocksOf(opinions[0])).toHaveLength(1)
+    expect(opinions[1]).toBeUndefined()
+    expect(blocksOf(opinions[2])[0]).toMatchObject({ tool: 'run', clearOnChange: true })
+
+    // 瞬时失败：失败一次 → 写操作 → 再失败一次，不算连续 2 次
+    const flaky = failed({ name: 'test', errorCode: 'TOOL_FAILED', errorClass: 'transient' })
+    expect(await run(flaky, fix, flaky)).toEqual([undefined, undefined, undefined])
+
+    // 重复执行副作用：中间有别的写操作不算重复；没有就照旧封住，且带标记
+    const script = tool({ name: 'bash', inputHash: 'h5', effect: 'side_effect' })
+    expect(await run(script, fix, script)).toEqual([undefined, undefined, undefined])
+    const repeated = await run(script, script)
+    expect(blocksOf(repeated[1])[0]).toMatchObject({ code: 'repeat', clearOnChange: true })
   })
 })

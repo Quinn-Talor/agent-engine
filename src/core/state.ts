@@ -48,7 +48,7 @@ export interface ToolMeta {
   repeatable: boolean
 }
 
-/** 生效中的封路：持续到运行结束，委托人引导生效时全部解除。 */
+/** 生效中的封路：持续到运行结束，委托人引导生效时全部解除；带 clearOnChange 的在写操作成功时解除。 */
 export type ActiveBlock = CallBlock & {
   source: string
   /** 施加封路的步。 */
@@ -412,8 +412,13 @@ export function apply(state: RunState, e: RunEvent): RunState {
     }
     case 'tool_finished': {
       const results = { ...s.results, [e.callId]: e }
+      // 写操作成功：环境变了，依赖环境状态的封路解除（F25）。
+      const changed = !e.isError && e.effect === 'side_effect'
       let next: RunState = {
         ...s,
+        ...(changed && s.blocks.some((b) => b.clearOnChange)
+          ? { blocks: s.blocks.filter((b) => !b.clearOnChange) }
+          : {}),
         results,
         toolCallCount: s.toolCallCount + 1,
         usage: e.usage ? addToBucket(s.usage, 'children', e.usage) : s.usage,

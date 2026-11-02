@@ -2,6 +2,7 @@
 // 确定性错误一次就封；有副作用且结果未知（可能已经执行）的一次就封；瞬时错误第 2 次失败才封；相同输入两次返回相同结果封；
 // 有副作用的操作以相同输入第 2 次成功后封（比方案原文收紧，见 F18 规格 §B.2）。
 // 轮询类工具、意图工具（交付退回后会以相同输入再调）与撞上封路的调用不记账。
+// 依赖环境状态的封路（失败、结果不变、重复执行副作用）带 clearOnChange：之后有别的写操作成功时，运行状态解除它、这里清账（F25）。
 
 import type { CallBlock, Guard, GuardOpinion } from '../../contracts/component.js'
 
@@ -10,6 +11,8 @@ interface CallRecord {
   lastOutput?: string
   successes: number
   blocked: boolean
+  /** 封住它的理由依赖环境状态，写操作成功后清账。 */
+  clearable: boolean
 }
 
 /** 按错误给建议：参数错就修参数，被拒绝或没权限就别重试、也别换做法绕过，暂时不可用就别用相同输入重试。 */
@@ -25,6 +28,16 @@ function failureSuggest(code: string, deterministic: boolean): string {
     : '暂时不可用，不要用相同输入重试；改用其他工具，或基于已有信息作答'
 }
 
+/** 与环境状态无关的失败：输入本身不合法、被拒绝、子任务起不来。 */
+function stateIndependent(code: string): boolean {
+  return (
+    code === 'INVALID_INPUT' ||
+    code === 'PERMISSION_DENIED' ||
+    code === 'USER_DENIED' ||
+    code.startsWith('SPAWN_')
+  )
+}
+
 function failureCode(code: string): string {
   if (code === 'USER_DENIED') return 'user_denied'
   if (code.startsWith('SPAWN_')) return 'spawn_failed'
@@ -35,22 +48,46 @@ function failureCode(code: string): string {
 export function roadblock(): Guard {
   return {
     id: 'roadblock',
-    version: '3',
+    version: '4',
     start() {
       const calls = new Map<string, CallRecord>()
       return {
         check(facts): GuardOpinion | undefined {
+          // 本步成功的写操作；每条账只认"别的"写操作（自己重复成功不算环境变化）。
+          const writes = facts.toolCalls
+            .filter((c) => c.ok && c.effect === 'side_effect' && !c.blocked && !c.intentTool)
+            .map((c) => `${c.name}|${c.inputHash}`)
+          if (writes.length > 0) {
+            // 环境变了：之前的失败、输出与成功次数都不再说明问题；只有依赖环境的封路解除。
+            for (const [key, r] of calls) {
+              if (!writes.some((w) => w !== key)) continue
+              r.failures = 0
+              r.successes = 0
+              r.lastOutput = undefined
+              if (r.clearable) {
+                r.blocked = false
+                r.clearable = false
+              }
+            }
+          }
           const dead: CallBlock[] = []
           for (const c of facts.toolCalls) {
             if (c.blocked || c.repeatable || c.intentTool) continue
             const key = `${c.name}|${c.inputHash}`
-            const r = calls.get(key) ?? { failures: 0, successes: 0, blocked: false }
+            const r = calls.get(key) ?? {
+              failures: 0,
+              successes: 0,
+              blocked: false,
+              clearable: false,
+            }
             calls.set(key, r)
             if (r.blocked) continue
             let block: Omit<CallBlock, 'tool' | 'inputHash'> | undefined
+            let clearOnChange = false
             if (!c.ok) {
               r.failures += 1
               const code = c.errorCode ?? ''
+              clearOnChange = !c.possiblyExecuted && !stateIndependent(code)
               if (c.possiblyExecuted) {
                 // 副作用可能已经执行：相同输入再调一次可能重复执行（I15）。
                 block = {
@@ -74,12 +111,15 @@ export function roadblock(): Guard {
             } else {
               r.successes += 1
               if (c.effect === 'side_effect' && r.successes >= 2) {
+                // 中间没有别的写操作的重复执行；有了别的写操作（例如改代码后重跑）就解除
+                clearOnChange = true
                 block = {
                   code: 'repeat',
                   reason: '有副作用的操作已用相同输入成功执行 2 次',
                   suggest: '不要重复执行；需要结果时引用上一次的输出',
                 }
               } else if (r.lastOutput === c.outputHash) {
+                clearOnChange = true
                 block = {
                   code: 'repeat',
                   reason: '连续 2 次返回相同结果',
@@ -90,7 +130,13 @@ export function roadblock(): Guard {
             }
             if (block) {
               r.blocked = true
-              dead.push({ tool: c.name, inputHash: c.inputHash, ...block })
+              r.clearable = clearOnChange
+              dead.push({
+                tool: c.name,
+                inputHash: c.inputHash,
+                ...block,
+                ...(clearOnChange ? { clearOnChange: true as const } : {}),
+              })
             }
           }
           if (dead.length === 0) return undefined

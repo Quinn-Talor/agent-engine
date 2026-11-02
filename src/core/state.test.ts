@@ -336,6 +336,43 @@ describe('state machine', () => {
     expect(state.transcript.at(-1)).toEqual({ origin: 'steer', step: 7, text: '换个方向' })
   })
 
+  it('F25 AC-004 lifts blocks that depend on the environment once a write succeeds', () => {
+    const lifted = {
+      tool: 'run',
+      inputHash: 'h1',
+      code: 'failure_streak',
+      reason: 'r',
+      clearOnChange: true as const,
+    }
+    const kept = { tool: 'send', inputHash: 'h2', code: 'repeat', reason: 'r' }
+    let state = fold([
+      runStarted(),
+      stepStarted(1),
+      {
+        t: 'intervention_applied',
+        step: 1,
+        intervention: { block: lifted },
+        source: 'engine:roadblock',
+      },
+      {
+        t: 'intervention_applied',
+        step: 1,
+        intervention: { block: kept },
+        source: 'engine:roadblock',
+      },
+    ])
+    state = fold(
+      [
+        toolFinished('c1', { effect: 'side_effect', isError: true }),
+        toolFinished('c2', { effect: 'none' }),
+      ],
+      state,
+    )
+    expect(state.blocks.map((b) => b.tool)).toEqual(['run', 'send'])
+    state = fold([toolFinished('c3', { effect: 'side_effect' })], state)
+    expect(state.blocks.map((b) => b.tool)).toEqual(['send'])
+  })
+
   it('keeps provider data of tool calls in the transcript so it can be replayed', () => {
     const state = fold([
       runStarted(),

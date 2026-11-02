@@ -50,6 +50,17 @@ describe('renderSteering', () => {
     ])
   })
 
+  it('F25 AC-005 says which blocks lift after a successful write', () => {
+    const text = renderSteering({
+      step: 2,
+      findings: ['- 问题'],
+      blocks: [{ ...block('run'), clearOnChange: true }, block('send')],
+      stepsLeft: 5,
+    })
+    expect(text).toContain('- run：已失败 2 次（TOOL_TIMEOUT）（写操作成功后解除）')
+    expect(text).toContain('- send：已失败 2 次（TOOL_TIMEOUT）\n')
+  })
+
   it('AC-017 leaves out the goal, blocks, time and missing exits', () => {
     const text = renderSteering({ step: 1, findings: ['- 问题'], blocks: [], stepsLeft: 5 })
     expect(text.split('\n')).toEqual([

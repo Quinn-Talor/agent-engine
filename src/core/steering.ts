@@ -11,6 +11,8 @@ const MAX_FINDING_CHARS = 400
 const MAX_GOAL_CHARS = 200
 const MAX_REASON_CHARS = 80
 const MAX_BLOCK_LINES = 5
+/** 依赖环境状态的封路的行尾说明（F25）。 */
+const LIFTS_ON_CHANGE = '（写操作成功后解除）'
 
 export interface SteeringInput {
   step: number
@@ -47,7 +49,8 @@ export function renderSteering(input: SteeringInput): string {
     lines.push('已封住（再调用将收尾）：')
     for (const b of input.blocks.slice(0, MAX_BLOCK_LINES)) {
       const suggest = b.suggest ? `；建议：${b.suggest.slice(0, MAX_REASON_CHARS)}` : ''
-      lines.push(`- ${b.tool}：${b.reason.slice(0, MAX_REASON_CHARS)}${suggest}`)
+      const lift = b.clearOnChange ? LIFTS_ON_CHANGE : ''
+      lines.push(`- ${b.tool}：${b.reason.slice(0, MAX_REASON_CHARS)}${suggest}${lift}`)
     }
     if (input.blocks.length > MAX_BLOCK_LINES) {
       lines.push(`- 另有 ${input.blocks.length - MAX_BLOCK_LINES} 个`)

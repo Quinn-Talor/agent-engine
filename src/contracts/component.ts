@@ -171,6 +171,8 @@ export interface CallBlock {
   code: string
   reason: string
   suggest?: string
+  /** 封路的理由依赖环境状态（失败、结果不变）：之后有写操作成功时解除。 */
+  clearOnChange?: true
 }
 
 /** 告知、等待输入或终止；完成只由交付验收判定，守卫不能给出。 */
