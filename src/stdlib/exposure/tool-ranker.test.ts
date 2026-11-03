@@ -35,6 +35,20 @@ describe('bm25Ranker', () => {
     expect((await ranker.rank('browser click', tools))[0]!.name).toBe('web__browserClick')
   })
 
+  it('weights single characters split from a longer Chinese word by unigramWeight', async () => {
+    const docs = [
+      { name: 'a', capability: 'x', description: '日' },
+      { name: 'b', capability: 'x', description: '周' },
+    ]
+    const full = await bm25Ranker({ unigramWeight: 1 }).rank('日线', docs)
+    const low = await bm25Ranker({ unigramWeight: 0.3 }).rank('日线', docs)
+    expect(full.map((h) => h.name)).toEqual(['a'])
+    expect(low[0]!.score).toBeCloseTo(full[0]!.score * 0.3)
+    // 单独一个汉字不是切出来的，按全权重
+    const single = await bm25Ranker({ unigramWeight: 0.3 }).rank('日', docs)
+    expect(single[0]!.score).toBeCloseTo(full[0]!.score)
+  })
+
   it('returns nothing for an empty query or no candidates', async () => {
     expect(await ranker.rank('', tools)).toEqual([])
     expect(await ranker.rank('日线', [])).toEqual([])

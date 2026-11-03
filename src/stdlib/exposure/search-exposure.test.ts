@@ -41,7 +41,7 @@ function setup(prepared: readonly Prepared[] = thirty, opts: SearchExposureOptio
 describe('searchExposure', () => {
   it('provides search_tool with a query and an optional server', () => {
     const { exposure } = setup()
-    expect(exposure).toMatchObject({ id: 'search', version: '2' })
+    expect(exposure).toMatchObject({ id: 'search', version: '3' })
     expect(exposure.tools!.map((t) => [t.name, t.execution?.effect])).toEqual([
       ['search_tool', 'none'],
     ])

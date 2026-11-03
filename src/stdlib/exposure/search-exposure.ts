@@ -116,7 +116,7 @@ export function searchExposure(opts: SearchExposureOptions = {}): Exposure {
 
   return {
     id: 'search',
-    version: '2',
+    version: '3',
     tools: [searchTool],
     start(run) {
       return {
