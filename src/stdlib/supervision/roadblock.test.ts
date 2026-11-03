@@ -18,12 +18,12 @@ describe('roadblock', () => {
     [
       'PERMISSION_DENIED',
       'failure_streak',
-      '被规则拒绝：不要重试，也不要换工具或换写法去做同一件事；向委托人说明原因，或只做不受限制的部分',
+      '被规则拒绝：本次任务里不要重试，也不要换工具或换写法去做同一件事；向委托人说明原因，或只做不受限制的部分',
     ],
     [
       'USER_DENIED',
       'user_denied',
-      '委托人拒绝了这个操作：不要重试，也不要换工具或换写法去做同一件事；改做其他部分，或询问委托人',
+      '委托人拒绝了这个操作：本次任务里不要重试，也不要换工具或换写法去做同一件事；改做其他部分，或询问委托人',
     ],
     ['SPAWN_LIMIT', 'spawn_failed', '子任务无法启动；自己完成，或调整委托方式'],
   ])(
@@ -164,7 +164,7 @@ describe('roadblock', () => {
     const [opinion] = await checkAll(roadblock(), factSteps({ toolCalls: [a, b] }))
     expect((opinion as Warn).warn.problem).toBe('2 个调用不会再有不同结果，已封住')
     expect((opinion as Warn).warn.suggest).toBe(
-      '按错误信息修正参数后再调用：输入不同就不受封路影响；委托人拒绝了这个操作：不要重试，也不要换工具或换写法去做同一件事；改做其他部分，或询问委托人',
+      '按错误信息修正参数后再调用：输入不同就不受封路影响；委托人拒绝了这个操作：本次任务里不要重试，也不要换工具或换写法去做同一件事；改做其他部分，或询问委托人',
     )
     expect(blocksOf(opinion).map((b) => b.tool)).toEqual(['a', 'b'])
   })
