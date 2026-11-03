@@ -92,6 +92,7 @@ export interface ModelError {
 
 export interface ModelPort {
   ref: ModelRef
+  /** 可以随应用配置变化（例如用 getter 读当前配置）；引擎在每次运行开始时读取，运行中不变。 */
   capabilities: ModelCapabilities
   call(
     input: ModelInput,

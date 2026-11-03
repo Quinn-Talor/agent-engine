@@ -242,6 +242,28 @@ describe('modelHub', () => {
     expect(hub.defaultModel).toBe('fake:m')
   })
 
+  it('reads the capabilities from the provider on every access, not once when resolving', () => {
+    let current: ModelCapabilities = caps
+    const port: ModelPort = {
+      ref: 'fake:m',
+      get capabilities() {
+        return current
+      },
+      call: async () => {
+        throw new Error('not called')
+      },
+    }
+    const hub = modelHub({
+      providers: [{ id: 'fake', resolve: (r: string) => (r === 'fake:m' ? port : undefined) }],
+      clock: new FakeClock(),
+    })
+    const wrapped = hub.resolve('fake:m')!
+    expect(wrapped.capabilities.contextLimit).toBe(caps.contextLimit)
+    current = { ...caps, contextLimit: 40_000 }
+    expect(hub.resolve('fake:m')).toBe(wrapped)
+    expect(wrapped.capabilities.contextLimit).toBe(40_000)
+  })
+
   it('notifies health listeners until they unsubscribe', async () => {
     const s = setup({ breaker: { failureThreshold: 1 } })
     const states: string[] = []

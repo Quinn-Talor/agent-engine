@@ -115,7 +115,10 @@ export function modelHub(opts: ModelHubOptions): ModelHub {
 
     return {
       ref: port.ref,
-      capabilities: port.capabilities,
+      // 每次读取都转给提供方：能力可能随应用配置变化，包装后的端口按引用缓存，不能在这里取快照
+      get capabilities() {
+        return port.capabilities
+      },
       async call(input, { signal, onDelta }) {
         await semaphore.acquire(signal)
         try {
