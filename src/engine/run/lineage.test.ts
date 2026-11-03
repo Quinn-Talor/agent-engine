@@ -74,10 +74,10 @@ describe('checkSpawn', () => {
     const check = (task = timed, remaining: { timeMs?: number; cost?: number } = {}) =>
       checkSpawn({ lineage: lineage(), delegation: {}, agent: child, task, remaining })
     const untimed = taskOf()
-    expect(check(untimed)).toMatchObject({
-      ok: false,
-      error: { code: 'SPAWN_BUDGET', message: '子运行必须设置 maxTotalMs' },
-    })
+    // 父运行和子运行都没有时长上限：子运行用默认的 10 分钟，不拒绝委托（I12：子运行总有时长上限）。
+    expect(check(untimed)).toEqual({ ok: true, ceiling: { maxTotalMs: 600_000 } })
+    // 子运行自己设了时长、父运行没有：用子运行自己的，不再叠加默认上限。
+    expect(check(timed)).toEqual({ ok: true, ceiling: {} })
     expect(check(untimed, { timeMs: 30_000 })).toEqual({
       ok: true,
       ceiling: { maxTotalMs: 30_000 },

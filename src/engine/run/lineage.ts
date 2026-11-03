@@ -9,6 +9,8 @@ import { Limiter } from '../../executor/act/act.js'
 
 const DEFAULT_DEPTH = 3
 const DEFAULT_PER_AGENT = 3
+/** 父运行和子运行都没有时长上限时，子运行的时长上限（子运行总有时长上限，I12）。 */
+const DEFAULT_CHILD_MAX_TOTAL_MS = 600_000
 
 /** 按根运行统计的委托次数与子运行并发。 */
 export interface RootCounters {
@@ -73,9 +75,6 @@ export function checkSpawn(input: {
   }
 
   const time = task.budget?.maxTotalMs
-  if (time === undefined && remaining.timeMs === undefined) {
-    return refuse('SPAWN_BUDGET', '子运行必须设置 maxTotalMs')
-  }
   if (
     remaining.timeMs !== undefined &&
     (remaining.timeMs <= 0 || (time !== undefined && time > remaining.timeMs))
@@ -91,10 +90,13 @@ export function checkSpawn(input: {
   }
 
   lineage.root.spawned.set(agent.id, (lineage.root.spawned.get(agent.id) ?? 0) + 1)
+  // 时长上限：父运行有上限时取它的剩余时长；子运行自己设了时长时用它的；都没有时用默认值。
+  const maxTotalMs =
+    remaining.timeMs ?? (time === undefined ? DEFAULT_CHILD_MAX_TOTAL_MS : undefined)
   return {
     ok: true,
     ceiling: {
-      ...(remaining.timeMs !== undefined ? { maxTotalMs: remaining.timeMs } : {}),
+      ...(maxTotalMs !== undefined ? { maxTotalMs } : {}),
       ...(remaining.cost !== undefined ? { maxCost: remaining.cost } : {}),
     },
   }
