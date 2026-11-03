@@ -120,7 +120,7 @@ export function stepFacts(
     finishReason: response?.finishReason ?? 'other',
     interventions: { applied, violated },
     pressure: {
-      context: Number.isFinite(state.contextLimit) ? state.lastEstimate / state.contextLimit : 0,
+      context: Number.isFinite(state.inputLimit) ? state.lastEstimate / state.inputLimit : 0,
       steps: step / budget.maxSteps,
       // 按收尾预留之前的可用时长算：到 1 时 decide 以 timeout 收尾。
       time:

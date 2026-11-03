@@ -53,7 +53,8 @@ export interface Run {
    * 用回调的 `run.runId` 区分；子运行从它的第一条事件开始送。
    */
   subscribe(sub: RunSubscriber, opts?: { fromSeq?: number; children?: boolean }): () => void
-  steer(text: string): void
+  /** 并入本轮的委托人引导；运行已经结束时不收，返回 false（会话里改为开新的一轮）。 */
+  steer(text: string): boolean
   abort(reason?: string): void
 }
 
@@ -70,6 +71,10 @@ export interface RunSummary {
   agentFingerprint: string
   model: ModelRef
   subject?: string
+  /** 所属会话；`turn` 是它在会话里的序号（没开始的运行没有序号），`continues` 是它接着的一轮。 */
+  session?: string
+  turn?: number
+  continues?: string
   status?: RunStatus
   code?: string
   startedAt: number

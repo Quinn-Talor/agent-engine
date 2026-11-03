@@ -31,7 +31,14 @@ const completeVerdict = { complete: true as const, sources: ['default'] }
 
 const fullRun = () =>
   sequence([
-    runStarted({ task: { fingerprint: 't', subject: 's-1' }, parentRunId: 'p-1' }),
+    runStarted({
+      task: {
+        fingerprint: 't',
+        content: 'sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',
+        subject: 's-1',
+      },
+      parentRunId: 'p-1',
+    }),
     stepStarted(1),
     contextBuilt(1),
     modelResponded(1, { toolCalls: [call('c1')] }),

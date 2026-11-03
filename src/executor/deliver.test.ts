@@ -460,7 +460,13 @@ describe('deliver — fallback path', () => {
 
 const withBudget = (budget: Record<string, number>, text = 'x'): RunState =>
   fold([
-    runStarted({ task: { fingerprint: 'task-fp', budget } }),
+    runStarted({
+      task: {
+        fingerprint: 'task-fp',
+        content: 'sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',
+        budget,
+      },
+    }),
     stepStarted(1),
     contextBuilt(1),
     modelResponded(1, { text }),

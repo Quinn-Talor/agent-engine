@@ -19,7 +19,7 @@ describe('runToEnd', () => {
       runId: 'r',
       result: Promise.resolve(result),
       subscribe: () => () => {},
-      steer: () => {},
+      steer: () => false,
       abort: () => {},
     }
     expect(await runToEnd(silent)).toEqual({ result, events: [] })
@@ -39,6 +39,7 @@ describe('runToEnd', () => {
         query: (filter) => a.query(filter),
         pin: (runId, reason) => a.pin(runId, reason),
         retain: (policy) => a.retain(policy),
+        deleteSession: (session) => a.deleteSession(session),
       }),
     })
     const run = h.start()

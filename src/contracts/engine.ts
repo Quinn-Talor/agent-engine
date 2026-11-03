@@ -4,7 +4,8 @@ import type { CapabilityHost } from './capability.js'
 import type { Clock, Logger, SecretResolver } from './common.js'
 import type { Guard, Memory } from './component.js'
 import type { EnvironmentConfig, Environment } from './environment.js'
-import type { Archive } from './events.js'
+import type { ModelMessage } from './common.js'
+import type { Archive, LedgerEntry, RetainReport } from './events.js'
 import type { ModelHub } from './model.js'
 import type { RunSummary } from './run.js'
 
@@ -44,8 +45,35 @@ export interface EngineConfig {
   guards?: Guard[]
 }
 
+/** 会话下一轮会带入的窗口（会话方案 §4）：轮开始时的压缩还没有算。 */
+export type WindowPreview =
+  | {
+      ok: true
+      turn: number
+      /** 接在哪一轮之后（runId）。 */
+      continues?: string
+      messages: ModelMessage[]
+      summary?: string
+      ledger: LedgerEntry[]
+      ledgerOmitted: number
+      tokens: number
+    }
+  | { ok: false; code: 'session_busy' | 'invalid_task'; message: string }
+
+/** `session_busy`：本引擎正在跑或受理这个会话的一轮；`session_open`：档案里会话还有没结束的运行。 */
+export type SessionDeletion =
+  | ({ ok: true } & RetainReport)
+  | { ok: false; code: 'session_busy' | 'session_open'; message: string }
+
 export interface Engine {
   environment(config: EnvironmentConfig): Environment
+  /** 预览会话下一轮带入的窗口：不调用模型；会话有一轮正在运行时 session_busy。 */
+  previewWindow(q: { session: string; continues?: string | null }): Promise<WindowPreview>
+  /**
+   * 删除整个会话（含子运行与固定的运行）；有运行中或正在受理的轮时 session_busy，档案里有没结束的运行时
+   * session_open（会话方案 §13）。
+   */
+  deleteSession(session: string): Promise<SessionDeletion>
   /** 记忆、监督、默认交付物与默认工具呈现的指纹。 */
   readonly fingerprint: string
   /** 本次启动时补齐结尾的中断运行，由应用决定是否接着做。 */

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { canonicalJson, hashOf, inputHash, sha256Hex } from './hash.js'
+import { canonicalJson, hashOf, inputHash, parseCanonical, sha256Hex } from './hash.js'
 
 describe('canonicalJson', () => {
   it.each([
@@ -67,5 +67,26 @@ describe('hashes', () => {
 
   it('inputHash treats a missing input as null', () => {
     expect(inputHash(undefined)).toBe(inputHash(null))
+  })
+})
+
+describe('parseCanonical', () => {
+  it.each([
+    ['bytes', new Uint8Array([1, 2, 3])],
+    [
+      'an image part inside a message',
+      { role: 'user', content: [{ type: 'image', image: new Uint8Array([9]) }] },
+    ],
+    ['an object whose key looks like the bytes marker', { $bytes: 'x', $$bytes: 'y' }],
+    ['nested arrays and primitives', [null, true, 'x', 1.5, { a: [new Uint8Array([0])] }]],
+  ])('AC-010 reads back %s exactly as written', (_name, value) => {
+    expect(parseCanonical(canonicalJson(value))).toEqual(value)
+  })
+
+  it('AC-010 turns the bytes marker back into Uint8Array, not into an object', () => {
+    const back = parseCanonical(canonicalJson({ image: new Uint8Array([1, 2]) })) as {
+      image: unknown
+    }
+    expect(back.image).toBeInstanceOf(Uint8Array)
   })
 })

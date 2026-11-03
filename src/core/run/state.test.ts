@@ -70,6 +70,17 @@ describe('state machine', () => {
     expect(state.outcome).toEqual({ status: 'stopped', code: 'context_overflow' })
   })
 
+  it('AC-007 leaves room for the output: stops at the window minus the output reserve', () => {
+    const at = (estimate: number) =>
+      fold([
+        runStarted({ contextLimit: 1000, outputReserve: 200 }),
+        stepStarted(1),
+        contextBuilt(1, estimate),
+      ]).outcome
+    expect(at(799)).toBeUndefined()
+    expect(at(800)).toEqual({ status: 'stopped', code: 'context_overflow' })
+  })
+
   it.each<[string, string, object]>([
     [
       'AC-008 classifies model errors as model_error',

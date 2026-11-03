@@ -17,7 +17,12 @@ function advisorCtx(...replies: Array<string | undefined>) {
       const text = replies.shift()
       return text === undefined
         ? undefined
-        : { text, usage: { input: 10, output: 5, cacheRead: 0, cacheWrite: 0 }, model: 'fake:m' }
+        : {
+            text,
+            usage: { input: 10, output: 5, cacheRead: 0, cacheWrite: 0 },
+            model: 'fake:m',
+            finishReason: 'stop' as const,
+          }
     },
   })
   return { ctx, requests }

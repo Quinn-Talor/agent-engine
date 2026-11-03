@@ -1,5 +1,5 @@
 // 内存运行档案（设计 §8.5）：引擎的默认运行档案；与 SQLite 实现共用存储契约。
-// 保留清理不删最近写过（含去重命中）的 blob：运行可能刚拿到引用、还没写进事件。
+// 保留清理不删最近写过（含去重命中）的 blob：运行可能刚拿到引用、还没写进事件。会话按整体过期与删除。
 
 import type { Clock } from '../contracts/common.js'
 import type {
@@ -13,6 +13,7 @@ import { SCHEMA_VERSION, type ArchiveStore } from '../contracts/events.js'
 import type { RunSummary } from '../contracts/run.js'
 import { sha256Hex } from '../core/definition/hash.js'
 import { summarize } from '../core/log/projections.js'
+import { expiredRuns } from '../core/log/retention.js'
 import { upcastEvent } from '../core/log/upcast.js'
 import { systemClock } from './clock.js'
 
@@ -36,6 +37,7 @@ function refsOf(events: readonly RunEvent[]): Set<BlobRef> {
 function matches(s: RunSummary, f: RunFilter): boolean {
   return (
     (f.subject === undefined || s.subject === f.subject) &&
+    (f.session === undefined || s.session === f.session) &&
     (f.environment === undefined || s.environment === f.environment) &&
     (f.agentId === undefined || s.agentId === f.agentId) &&
     (f.status === undefined || s.status === f.status) &&
@@ -52,6 +54,26 @@ export function memoryArchive(opts: { clock?: Clock } = {}): ArchiveStore {
   const blobs = new Map<BlobRef, string | Uint8Array>()
   /** 每个 blob 最近一次 putBlob（写入或去重命中）的时间。 */
   const touched = new Map<BlobRef, number>()
+
+  /** 删除运行，再清除只被它们引用、且在 `touchedBefore` 之前最后写入的 blob。 */
+  const remove = (ids: ReadonlySet<string>, touchedBefore: number): RetainReport => {
+    const removed: StoredRun[] = []
+    for (const runId of ids) {
+      const run = runs.get(runId)
+      if (!run) continue
+      removed.push(run)
+      runs.delete(runId)
+    }
+    // 还在用的运行（含没有结局的运行）引用的 blob 保留。
+    const keep = refsOf([...runs.values()].flatMap((r) => r.events))
+    let removedBlobs = 0
+    for (const ref of refsOf(removed.flatMap((r) => r.events))) {
+      if (keep.has(ref) || (touched.get(ref) ?? -Infinity) > touchedBefore) continue
+      touched.delete(ref)
+      if (blobs.delete(ref)) removedBlobs += 1
+    }
+    return { removedRuns: removed.length, removedBlobs }
+  }
 
   return {
     async append(runId, events) {
@@ -109,26 +131,41 @@ export function memoryArchive(opts: { clock?: Clock } = {}): ArchiveStore {
     },
 
     async retain(policy: RetentionPolicy): Promise<RetainReport> {
-      const removed: StoredRun[] = []
-      for (const [runId, run] of runs) {
-        const s = run.summary
-        if (!s || s.endedAt === undefined || run.pinned) continue
-        const days = policy.environments?.[s.environment] ?? policy.defaultDays
-        if (s.endedAt < policy.now - days * DAY_MS) {
-          removed.push(run)
-          runs.delete(runId)
-        }
+      const expired = expiredRuns(
+        [...runs.entries()].flatMap(([runId, r]) =>
+          r.summary
+            ? [
+                {
+                  runId,
+                  rootRunId: r.summary.rootRunId,
+                  ...(r.summary.session !== undefined ? { session: r.summary.session } : {}),
+                  environment: r.summary.environment,
+                  ...(r.summary.endedAt !== undefined ? { endedAt: r.summary.endedAt } : {}),
+                  pinned: r.pinned,
+                },
+              ]
+            : [],
+        ),
+        policy,
+      )
+      return remove(expired, clock.now() - BLOB_GRACE_MS)
+    },
+
+    async deleteSession(session) {
+      const turns = [...runs.entries()].filter(([, r]) => r.summary?.session === session)
+      const roots = new Set(turns.map(([runId]) => runId))
+      const members = [...runs.entries()].filter(
+        ([runId, r]) => roots.has(runId) || roots.has(r.summary?.rootRunId ?? ''),
+      )
+      if (members.some(([, r]) => r.summary?.endedAt === undefined)) {
+        throw new Error(`archive: 会话 ${session} 有没结束的运行，不能删除`)
       }
-      // 还在用的运行（含没有结局的运行）引用的 blob 保留；宽限期内写过的也保留。
-      const keep = refsOf([...runs.values()].flatMap((r) => r.events))
-      const recent = clock.now() - BLOB_GRACE_MS
-      let removedBlobs = 0
-      for (const ref of refsOf(removed.flatMap((r) => r.events))) {
-        if (keep.has(ref) || (touched.get(ref) ?? -Infinity) >= recent) continue
-        touched.delete(ref)
-        if (blobs.delete(ref)) removedBlobs += 1
-      }
-      return { removedRuns: removed.length, removedBlobs }
+      // 会话结束之后没有被再次写入过的 blob 只属于这个会话（或被别的运行的事件引用，下面会留下）。
+      const lastEnded = Math.max(-Infinity, ...members.map(([, r]) => r.summary!.endedAt!))
+      return remove(
+        new Set(members.map(([runId]) => runId)),
+        Math.max(lastEnded, clock.now() - BLOB_GRACE_MS),
+      )
     },
   }
 }

@@ -85,7 +85,8 @@ export interface RunState {
   phase: RunPhase
   startedAt?: number
   model?: ModelRef
-  contextLimit: number
+  /** 输入上限：模型窗口减去输出预留；估算达到它就不调用模型（I7）。 */
+  inputLimit: number
   budget: EffectiveBudget
   principalReachable: boolean
   tools: Readonly<Record<string, ToolMeta>>
@@ -167,7 +168,7 @@ export function initial(snapshot: RunSnapshot): RunState {
   return {
     runId: snapshot.runId,
     phase: 'prepare',
-    contextLimit: Infinity,
+    inputLimit: Infinity,
     budget: { ...DEFAULT_BUDGET },
     principalReachable: false,
     tools: {},
@@ -298,7 +299,7 @@ export function apply(state: RunState, e: RunEvent): RunState {
         // 排队时间计入总时长（设计 §5.3）：从受理开始算，与硬截止时间一致。
         startedAt: e.at - e.queuedMs,
         model: e.model,
-        contextLimit: e.contextLimit ?? Infinity,
+        inputLimit: e.contextLimit - e.outputReserve,
         budget: { ...DEFAULT_BUDGET, ...e.task.budget },
         principalReachable: e.environment.principalReachable,
         tools,
@@ -348,7 +349,7 @@ export function apply(state: RunState, e: RunEvent): RunState {
           pendingSteers: [],
         }
       }
-      if (e.estimate >= s.contextLimit) {
+      if (e.estimate >= s.inputLimit) {
         next = { ...next, outcome: { status: 'stopped', code: 'context_overflow' } }
       }
       return next

@@ -97,6 +97,10 @@ export function createRunContext(deps: RunContextDeps): RunContext {
     clock,
     random,
     signal: deps.signal,
+    modelLimits(ref) {
+      const caps = deps.hub.resolve(ref ?? run.model.ref)?.capabilities
+      return caps && { contextLimit: caps.contextLimit, maxOutputTokens: caps.maxOutputTokens }
+    },
     async callModel(req) {
       // 运行取消后不再发起新的模型调用（设计 §3.14）。
       if (deps.signal.aborted) throw abortError()
@@ -131,7 +135,12 @@ export function createRunContext(deps: RunContextDeps): RunContext {
           startedAt,
           durationMs: clock.now() - startedAt,
         })
-        return { text: response.text, usage: response.usage, model: ref }
+        return {
+          text: response.text,
+          usage: response.usage,
+          model: ref,
+          finishReason: response.finishReason,
+        }
       } catch (error) {
         pending.push({
           t: 'external_call',

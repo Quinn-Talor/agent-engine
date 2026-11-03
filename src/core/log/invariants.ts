@@ -146,22 +146,21 @@ export function checkInvariants(
 /** 完整检查：I4 可见工具 ⊆ 已准备；I5 出错有错误码；I6 completed 必经定稿；I7 超限不调模型；I9 模型错误有分类码；I10 严格重放。 */
 function checkComplete(events: readonly RunEvent[], report: Report): void {
   const prepared = new Set<string>()
-  let contextLimit: number | undefined
+  let inputLimit: number | undefined
   let overLimitStep: number | undefined
   let lastDelivery: Extract<RunEvent, { t: 'delivery_checked' }> | undefined
   for (const e of events) {
     switch (e.t) {
       case 'run_started':
         for (const c of e.capabilities) for (const t of c.tools) prepared.add(t.name)
-        contextLimit = e.contextLimit
+        inputLimit = e.contextLimit - e.outputReserve
         break
       case 'context_built': {
         const unknown = e.tools.filter((name) => !prepared.has(name))
         if (unknown.length > 0) {
           report('I4', `第 ${e.step} 步可见的工具不在已准备之列：${unknown.join(', ')}`, e.seq)
         }
-        overLimitStep =
-          contextLimit !== undefined && e.estimate >= contextLimit ? e.step : undefined
+        overLimitStep = inputLimit !== undefined && e.estimate >= inputLimit ? e.step : undefined
         break
       }
       case 'model_responded':

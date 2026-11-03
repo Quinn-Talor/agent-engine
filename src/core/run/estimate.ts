@@ -1,7 +1,7 @@
 // 全局唯一的 token 估算器（设计 §8.6）：超限检查、记忆和监督开销上限共用。
 
 import type { ModelMessage } from '../../contracts/common.js'
-import type { ModelToolSpec } from '../../contracts/model.js'
+import type { ModelCapabilities, ModelToolSpec } from '../../contracts/model.js'
 
 // 中日韩字符的码点区间：CJK 标点、假名、扩展 A、基本汉字、韩文音节、兼容汉字、全角形式。
 const CJK_RANGES: ReadonlyArray<readonly [number, number]> = [
@@ -79,4 +79,11 @@ export function estimateTools(tools: readonly ModelToolSpec[]): number {
 export function nextCalibration(prev: number, estimate: number, actual: number): number {
   if (actual <= 0 || estimate <= 0) return prev
   return Math.min(MAX_CALIBRATION, Math.max(MIN_CALIBRATION, (prev * actual) / estimate))
+}
+
+/** 输出预留：模型声明的输出上限，最多取窗口的一半（设计 §3.5）；输入上限 = 窗口 − 输出预留。 */
+export function outputReserveOf(
+  caps: Pick<ModelCapabilities, 'contextLimit' | 'maxOutputTokens'>,
+): number {
+  return Math.min(caps.maxOutputTokens, Math.floor(caps.contextLimit / 2))
 }

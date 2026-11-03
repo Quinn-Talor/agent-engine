@@ -222,7 +222,11 @@ describe('createEvaluator', () => {
   it('computes the time left from the last logged event, so replay renders the same text', async () => {
     const state = fold([
       runStarted({
-        task: { fingerprint: 't', budget: { maxTotalMs: 600_000, finalizeReserveMs: 0 } },
+        task: {
+          fingerprint: 't',
+          content: 'sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',
+          budget: { maxTotalMs: 600_000, finalizeReserveMs: 0 },
+        },
       }),
       stepStarted(1),
       contextBuilt(1),

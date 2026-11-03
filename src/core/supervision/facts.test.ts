@@ -149,7 +149,11 @@ describe('stepFacts', () => {
   it('computes time and cost pressure, including side model calls', () => {
     const state = fold([
       runStarted({
-        task: { fingerprint: 't', budget: { maxTotalMs: 1_000, finalizeReserveMs: 0, maxCost: 1 } },
+        task: {
+          fingerprint: 't',
+          content: 'sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',
+          budget: { maxTotalMs: 1_000, finalizeReserveMs: 0, maxCost: 1 },
+        },
       }),
       stepStarted(1),
       contextBuilt(1),
@@ -265,7 +269,13 @@ describe('stepFacts guard facts (F18)', () => {
     const at = (budget: { maxInputTokens?: number }) =>
       stepFacts(
         fold([
-          runStarted({ task: { fingerprint: 't', budget } }),
+          runStarted({
+            task: {
+              fingerprint: 't',
+              content: 'sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',
+              budget,
+            },
+          }),
           stepStarted(1),
           contextBuilt(1),
           modelResponded(1, { usage: { input: 900, output: 0, cacheRead: 0, cacheWrite: 0 } }),
@@ -279,7 +289,13 @@ describe('stepFacts guard facts (F18)', () => {
 
   it('AC-004 counts cached input toward token pressure', () => {
     const state = fold([
-      runStarted({ task: { fingerprint: 't', budget: { maxInputTokens: 1000 } } }),
+      runStarted({
+        task: {
+          fingerprint: 't',
+          content: 'sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',
+          budget: { maxInputTokens: 1000 },
+        },
+      }),
       stepStarted(1),
       contextBuilt(1),
       modelResponded(1, { usage: { input: 100, output: 50, cacheRead: 600, cacheWrite: 200 } }),
@@ -291,7 +307,13 @@ describe('stepFacts guard facts (F18)', () => {
     const at = (budget: { maxTotalMs: number; finalizeReserveMs?: number }, now: number) =>
       stepFacts(
         fold([
-          runStarted({ task: { fingerprint: 't', budget } }),
+          runStarted({
+            task: {
+              fingerprint: 't',
+              content: 'sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',
+              budget,
+            },
+          }),
           stepStarted(1),
           contextBuilt(1),
           modelResponded(1),
@@ -307,7 +329,11 @@ describe('stepFacts guard facts (F18)', () => {
   it('counts the admission queue toward the time used (§5.3)', () => {
     const state = fold([
       runStarted({
-        task: { fingerprint: 't', budget: { maxTotalMs: 1_000, finalizeReserveMs: 200 } },
+        task: {
+          fingerprint: 't',
+          content: 'sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',
+          budget: { maxTotalMs: 1_000, finalizeReserveMs: 200 },
+        },
         queuedMs: 400,
       }),
       stepStarted(1),
@@ -323,7 +349,11 @@ describe('stepFacts previews (F8)', () => {
   it('adds input and output previews, the repeatable flag and the remaining steps', () => {
     const state = fold([
       runStarted({
-        task: { fingerprint: 't', budget: { maxSteps: 5 } },
+        task: {
+          fingerprint: 't',
+          content: 'sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',
+          budget: { maxSteps: 5 },
+        },
         capabilities: [
           {
             capability: 'tools',

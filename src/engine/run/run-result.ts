@@ -90,7 +90,7 @@ export function buildResult(e: Ending): RunResult {
       : (o.error ?? {
           code: o.code ?? 'engine_error',
           message: o.message ?? o.code ?? 'engine_error',
-          retryable: o.code === 'admission_timeout',
+          retryable: o.code === 'admission_timeout' || o.code === 'session_busy',
         })
   const quality = qualityOf(e.events)
   const price = admitted?.price

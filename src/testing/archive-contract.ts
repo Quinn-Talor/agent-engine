@@ -20,12 +20,18 @@ function started(seq: number, at: number, subject: string): RunEvent {
     at,
     t: 'run_started',
     agent: { id: 'contract-agent', fingerprint: 'agent-fp' },
-    task: { fingerprint: 'task-fp', subject },
+    task: {
+      fingerprint: 'task-fp',
+      content: 'sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',
+      subject,
+    },
     environment: { name: 'contract', fingerprint: 'env-fp', principalReachable: false },
     engine: { fingerprint: 'engine-fp' },
     capabilities: [],
     unavailable: [],
     model: 'contract:model',
+    contextLimit: 10_000,
+    outputReserve: 0,
     queuedMs: 0,
     rootRunId: 'root',
     schemaVersion: SCHEMA_VERSION,
@@ -46,6 +52,32 @@ function ended(seq: number, at: number, runId: string): RunEvent {
     toolCalls: 0,
   }
   return { seq, at, t: 'run_ended', result }
+}
+
+/** 会话的一轮：根运行，带序号与接续点；`content` 引用一个 blob。 */
+function turnStarted(
+  runId: string,
+  turn: number,
+  opts: { continues?: string; content?: string; rootRunId?: string; session?: string } = {},
+): RunEvent {
+  const base = started(1, 1_000, opts.session ?? 's')
+  if (base.t !== 'run_started') throw new Error('unreachable')
+  const isChild = opts.rootRunId !== undefined
+  return {
+    ...base,
+    task: { ...base.task, ...(opts.content ? { content: opts.content } : {}) },
+    rootRunId: opts.rootRunId ?? runId,
+    ...(isChild
+      ? {}
+      : {
+          session: {
+            id: opts.session ?? 's',
+            turn,
+            ...(opts.continues ? { continues: { runId: opts.continues, seq: 2 } } : {}),
+            window: { version: 1, turnStarts: [], ledger: [], tokens: 0 },
+          },
+        }),
+  }
 }
 
 async function readSeqs(store: ArchiveStore, runId: string, fromSeq?: number): Promise<number[]> {
@@ -186,6 +218,67 @@ export function archiveStoreContract(
         const report = await store.retain({ defaultDays: 1, now: 10 * DAY_MS })
         assert.equal(report.removedRuns, 1)
         assert.deepEqual(await readSeqs(store, 'refused'), [])
+      },
+    },
+    {
+      name: 'queries the turns of a session with their number and continuation point',
+      async run() {
+        const store = await make()
+        await store.append('t1', [turnStarted('t1', 1), ended(2, 1_000, 't1')])
+        await store.append('t2', [turnStarted('t2', 2, { continues: 't1' }), ended(2, 2_000, 't2')])
+        await store.append('x1', [
+          turnStarted('x1', 1, { session: 'other' }),
+          ended(2, 1_000, 'x1'),
+        ])
+        const turns = (await store.query({ session: 's' })).sort((a, b) => a.turn! - b.turn!)
+        assert.deepEqual(
+          turns.map((t) => [t.runId, t.session, t.turn, t.continues]),
+          [
+            ['t1', 's', 1, undefined],
+            ['t2', 's', 2, 't1'],
+          ],
+        )
+      },
+    },
+    {
+      // 会话方案 §13：会话里每个运行都过期了，整个会话才一起清理，不会只剩半条链。
+      name: 'retains a session as a whole',
+      async run() {
+        const store = await make()
+        await store.append('t1', [turnStarted('t1', 1), ended(2, 1_000, 't1')])
+        await store.append('c1', [turnStarted('c1', 0, { rootRunId: 't1' }), ended(2, 1_000, 'c1')])
+        await store.append('t2', [turnStarted('t2', 2), ended(2, 9.5 * DAY_MS, 't2')])
+        assert.equal((await store.retain({ defaultDays: 1, now: 10 * DAY_MS })).removedRuns, 0)
+        assert.deepEqual(await readSeqs(store, 't1'), [1, 2])
+        assert.equal((await store.retain({ defaultDays: 1, now: 20 * DAY_MS })).removedRuns, 3)
+        assert.deepEqual(await readSeqs(store, 't2'), [])
+      },
+    },
+    {
+      name: 'deletes a session with its child runs and blobs, and refuses an open session',
+      async run() {
+        const store = await make()
+        const own = await store.putBlob('会话 s 的内容')
+        const shared = await store.putBlob('两个会话都引用的内容')
+        // blob 写在会话结束之前：会话结束之后没有再被写入，不受宽限期保护。
+        const end = Date.now() + DAY_MS
+        await store.append('t1', [turnStarted('t1', 1, { content: own }), ended(2, end, 't1')])
+        await store.append('c1', [
+          turnStarted('c1', 0, { rootRunId: 't1', content: shared }),
+          ended(2, end, 'c1'),
+        ])
+        await store.append('x1', [
+          turnStarted('x1', 1, { session: 'other', content: shared }),
+          ended(2, 1_000, 'x1'),
+        ])
+        await store.append('o1', [turnStarted('o1', 1, { session: 'open' })])
+        await assert.rejects(store.deleteSession('open'), /没结束/)
+        const report = await store.deleteSession('s')
+        assert.deepEqual(report, { removedRuns: 2, removedBlobs: 1 })
+        assert.deepEqual(await readSeqs(store, 'c1'), [])
+        await assert.rejects(store.getBlob(own))
+        assert.equal(await store.getBlob(shared), '两个会话都引用的内容')
+        assert.equal((await store.query({ session: 'other' })).length, 1)
       },
     },
     {

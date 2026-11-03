@@ -1,4 +1,5 @@
-// 引擎装配（设计 §1.2、§2）：平台服务与运行机制、执行环境、运行登记、健康状态、关闭与中断补齐。
+// 引擎装配（设计 §1.2、§2）：平台服务与运行机制、执行环境、运行登记、健康状态、关闭与中断补齐、
+// 会话的预览与删除（会话方案 §4、§13）。
 // 默认组件由调用方给出（方案 D10）：`index.ts` 的 createEngine 用标准组件补齐。
 
 import type { Deliverable } from '../contracts/agent.js'
@@ -16,12 +17,14 @@ import {
 } from '../core/definition/fingerprint.js'
 import { freezeList, frozenCopy } from '../core/definition/freeze.js'
 import { foldState } from '../core/log/projections.js'
+import { estimateMessages } from '../core/run/estimate.js'
 import { apply } from '../core/run/state.js'
 import { normalizeOutput } from '../executor/act/exec.js'
 import { createAdmission } from '../services/admission.js'
 import { systemClock } from '../services/clock.js'
 import { delegationHost } from '../services/hosts/delegation-host.js'
 import { memoryArchive } from '../services/memory-archive.js'
+import { deriveWindow } from '../services/session-log.js'
 import { skillHost } from '../services/hosts/skill-host.js'
 import {
   startRun,
@@ -198,7 +201,7 @@ export function assembleEngine(config: EngineConfig, defaults: EngineDefaults): 
   if (issues.length > 0) throw new DefinitionError('invalid_engine', issues)
 
   const clock = services.clock ?? systemClock()
-  const archive = services.archive ?? memoryArchive()
+  const archive = services.archive ?? memoryArchive({ clock })
   const logger = services.logger ?? defaults.logger
   const admission = createAdmission({ ...services.admission, clock })
   const fingerprint = engineFingerprint({
@@ -211,6 +214,7 @@ export function assembleEngine(config: EngineConfig, defaults: EngineDefaults): 
   const active = new Set<StartedRun>()
   let closed = false
 
+  const recovery = recoverInterrupted(archive, clock, logger)
   const runtime: EngineRuntime = {
     hub: services.models,
     archive,
@@ -224,8 +228,9 @@ export function assembleEngine(config: EngineConfig, defaults: EngineDefaults): 
     defaults: { deliverable: defaults.deliverable, exposure: defaults.exposure },
     fingerprint,
     environmentOf: (e) => environments.get(e),
+    sessions: new Map(),
+    recovered: recovery,
   }
-  const recovery = recoverInterrupted(archive, clock, logger)
   const health = (): EngineHealth => ({
     breakers: [...services.models.health(), ...hostList.flatMap((h) => h.health?.() ?? [])],
     admission: admission.status(),
@@ -258,6 +263,44 @@ export function assembleEngine(config: EngineConfig, defaults: EngineDefaults): 
       return handle
     },
     interrupted: () => recovery,
+    async previewWindow(q) {
+      // 正在运行的轮还没有结局，从它推导出的窗口不是下一轮真正会带入的。
+      if (runtime.sessions.has(q.session)) {
+        return { ok: false, code: 'session_busy', message: `会话 ${q.session} 有一轮正在运行` }
+      }
+      await recovery
+      const r = await deriveWindow(archive, q)
+      if (!r.ok) return { ok: false, code: 'invalid_task', message: r.message }
+      const d = r.derived
+      return {
+        ok: true,
+        turn: d.turn,
+        ...(d.continues ? { continues: d.continues.runId } : {}),
+        messages: d.window.messages,
+        ...(d.window.summary !== undefined ? { summary: d.window.summary } : {}),
+        ledger: d.ledger,
+        ledgerOmitted: d.omitted,
+        tokens: estimateMessages(d.window.messages),
+      }
+    },
+    async deleteSession(session) {
+      // 占住会话再删：正在受理的轮还没有写进档案，档案自己看不到它。
+      if (runtime.sessions.has(session)) {
+        return { ok: false, code: 'session_busy', message: `会话 ${session} 有一轮正在运行` }
+      }
+      runtime.sessions.set(session, `delete:${session}`)
+      try {
+        await recovery
+        return { ok: true, ...(await archive.deleteSession(session)) }
+      } catch (error) {
+        // 档案拒绝删除：会话里有没结束的运行（例如 run_ended 没写进档案）。
+        const message = error instanceof Error ? error.message : String(error)
+        if (!message.includes('没结束')) throw error
+        return { ok: false, code: 'session_open', message }
+      } finally {
+        runtime.sessions.delete(session)
+      }
+    },
     health,
     onHealth(fn) {
       const notify = () => fn(health())

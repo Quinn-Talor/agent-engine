@@ -25,12 +25,17 @@ const runStarted = (
 ): RunEventBody => ({
   t: 'run_started',
   agent: { id: 'agent', fingerprint: 'agent-fp' },
-  task: { fingerprint: 'task-fp' },
+  task: {
+    fingerprint: 'task-fp',
+    content: 'sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',
+  },
   environment: { name: 'env', fingerprint: 'env-fp', principalReachable: true },
   engine: { fingerprint: 'engine-fp' },
   capabilities: [],
   unavailable: [],
   model: 'fake:model',
+  contextLimit: 10_000,
+  outputReserve: 0,
   queuedMs: 0,
   rootRunId: 'r1',
   schemaVersion: SCHEMA_VERSION,
@@ -55,6 +60,7 @@ const evaluated = (step: number): RunEventBody => ({
   },
   opinions: [],
   verdict: { complete: true, sources: ['default'] },
+  decidedAt: 0,
 })
 const modelResponded = (step: number, u: ReturnType<typeof usage>): RunEventBody => ({
   t: 'model_responded',
@@ -212,6 +218,7 @@ describe('sqliteArchive', () => {
       'runs_environment',
       'runs_parent',
       'runs_root',
+      'runs_session',
       'runs_subject',
     ])
     expect(columns).toEqual(
@@ -242,10 +249,13 @@ describe('sqliteArchive', () => {
         'cost',
         'pinned',
         'schema_version',
+        'session',
+        'turn',
+        'continues',
       ]),
     )
     // 表结构版本（不是事件格式版本 SCHEMA_VERSION）。
-    expect(version).toEqual({ value: '2' })
+    expect(version).toEqual({ value: '3' })
     expect(mode).toBe('wal')
     expect(blobColumns).toEqual(['sha', 'size', 'encoding', 'data', 'created_at', 'touched_at'])
   })
@@ -260,43 +270,17 @@ describe('sqliteArchive', () => {
     }
   })
 
-  it('AC-004 migrates an older file and rebuilds the missing summaries', async () => {
-    const file = fileOf()
-    const first = sqliteArchive({ file })
-    await first.putBlob('kept')
-    await first.append('a', run('a', 1_000))
-    first.close()
-    // 旧版文件：runs 没有 usage_json，blobs 没有 touched_at，表结构版本 1。
-    const old = new Database(file)
-    old.exec('ALTER TABLE runs DROP COLUMN usage_json')
-    old.exec('ALTER TABLE blobs DROP COLUMN touched_at')
-    old.exec("UPDATE meta SET value = '1' WHERE key = 'schema_version'")
-    old.close()
-
-    const migrated = sqliteArchive({ file })
-    const [summary] = await migrated.query({})
-    expect(summary).toMatchObject({
-      runId: 'a',
-      status: 'completed',
-      usage: { input: 30, output: 4 },
-    })
-    expect(await migrated.putBlob('kept')).toMatch(/^sha256:/)
-    migrated.close()
-    const db = new Database(file, { readonly: true })
-    expect(db.prepare("SELECT value FROM meta WHERE key = 'schema_version'").get()).toEqual({
-      value: '2',
-    })
-    db.close()
-  })
-
-  it('AC-004 refuses a file written by a newer version', () => {
-    const file = fileOf()
-    sqliteArchive({ file }).close()
-    const db = new Database(file)
-    db.exec("UPDATE meta SET value = '99' WHERE key = 'schema_version'")
-    db.close()
-    expect(() => sqliteArchive({ file })).toThrow('表结构版本 99')
-  })
+  it.each(['1', '2', '99'])(
+    'AC-003 refuses a file whose schema version is %s instead of migrating it',
+    (version) => {
+      const file = fileOf()
+      sqliteArchive({ file }).close()
+      const db = new Database(file)
+      db.exec(`UPDATE meta SET value = '${version}' WHERE key = 'schema_version'`)
+      db.close()
+      expect(() => sqliteArchive({ file })).toThrow(`表结构版本 ${version} 与本版本的 3 不一致`)
+    },
+  )
 
   it('AC-005 updates the summary as the run progresses', async () => {
     const file = fileOf()

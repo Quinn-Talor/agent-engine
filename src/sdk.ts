@@ -13,7 +13,11 @@ export {
   taskFingerprint,
 } from './core/definition/fingerprint.js'
 export type { ComponentIdentity } from './core/definition/fingerprint.js'
-export { guardOpinionIssue, permitResultIssue } from './core/definition/component-results.js'
+export {
+  guardOpinionIssue,
+  memoryViewIssue,
+  permitResultIssue,
+} from './core/definition/component-results.js'
 
 // 运行状态机、视图与估算
 export {
@@ -25,8 +29,8 @@ export {
   initial,
   nextStage,
 } from './core/run/state.js'
-export { layout, segmentToMessage } from './core/run/layout.js'
-export type { ViewParts } from './core/run/layout.js'
+export { layout, renderView, segmentToMessage, summaryMessage } from './core/run/layout.js'
+export type { Compaction, ViewParts } from './core/run/layout.js'
 export {
   estimateMessages,
   estimateText,
@@ -34,6 +38,8 @@ export {
   nextCalibration,
 } from './core/run/estimate.js'
 export { seededRandom } from './core/run/random.js'
+export { expiredRuns } from './core/log/retention.js'
+export type { RetainedRun } from './core/log/retention.js'
 
 // 监督：事实、判定、纠偏
 export { costOf, runCost, stepFacts } from './core/supervision/facts.js'
@@ -54,4 +60,5 @@ export { upcastEvent } from './core/log/upcast.js'
 export { createBreaker } from './services/breaker.js'
 export type { Breaker } from './services/breaker.js'
 export { AdmissionTimeoutError, createAdmission } from './services/admission.js'
+export { sessionLogIssues } from './services/session-log.js'
 export type { Admission, AdmissionSlot } from './services/admission.js'

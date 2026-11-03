@@ -62,7 +62,19 @@ describe('memoryArchive', () => {
   it('AC-012 queries summaries by subject, newest first, with a limit', async () => {
     const store = memoryArchive()
     const run = (subject: string, startAt: number) =>
-      sequence([runStarted({ task: { fingerprint: 't', subject } }), runEnded()], startAt)
+      sequence(
+        [
+          runStarted({
+            task: {
+              fingerprint: 't',
+              content: 'sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',
+              subject,
+            },
+          }),
+          runEnded(),
+        ],
+        startAt,
+      )
     await store.append('r1', run('s1', 1_000))
     await store.append('r2', run('s1', 5_000))
     await store.append('r3', run('s2', 9_000))

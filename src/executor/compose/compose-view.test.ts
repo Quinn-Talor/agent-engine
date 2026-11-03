@@ -122,143 +122,95 @@ describe('checkPairs', () => {
 })
 
 describe('recallView', () => {
+  const msg = (text: string): ModelMessage => ({ role: 'user', content: text })
+  const callMessage: ModelMessage = {
+    role: 'assistant',
+    content: [{ type: 'tool-call', toolCallId: 'c1', toolName: 't', input: {} }],
+  }
+  const resultMessage: ModelMessage = {
+    role: 'tool',
+    content: [{ type: 'tool-result', toolCallId: 'c1', toolName: 't', output: 'ok' }],
+  }
   const memoryState: MemoryState = {
     step: 1,
-    history: [],
-    transcript: [],
+    history: [msg('h1'), msg('h2')],
+    transcript: [callMessage, resultMessage, msg('t3')],
+    turnStarts: [],
     contextLimit: 1000,
+    inputLimit: 1000,
     fixedTokens: 0,
     estimate: () => 0,
   }
   const memoryOf = (recall: (s: MemoryState) => Promise<MemoryView>) => ({ recall })
-
-  it('AC-004 returns a valid view including compaction', async () => {
-    const view: MemoryView = {
-      history: [],
-      transcript: [],
-      compaction: { replaced: [0, 4], summary: 'summary', anchorsKept: 2 },
-    }
-    expect(
-      await recallView(
-        memoryOf(async () => view),
-        memoryState,
-        { clock: new FakeClock() },
-      ),
-    ).toBe(view)
-  })
-
-  it('AC-005 rejects a view that breaks tool pairs', async () => {
-    const broken = memoryOf(async () => ({
-      history: [],
-      transcript: [
-        {
-          role: 'assistant',
-          content: [{ type: 'tool-call', toolCallId: 'x', toolName: 't', input: {} }],
-        },
-      ],
-    }))
-    await expect(recallView(broken, memoryState, { clock: new FakeClock() })).rejects.toThrow(
-      '成对',
+  const recall = (view: MemoryView, logs: string[] = []) =>
+    recallView(
+      memoryOf(async () => view),
+      memoryState,
+      { clock: new FakeClock(), log: (message) => logs.push(message) },
     )
+
+  it('AC-004 returns the decision including the compaction and the notice', async () => {
+    const view: MemoryView = { compaction: { upTo: 2, summary: 'summary' }, notice: 'n' }
+    expect(await recall(view)).toEqual(view)
+    // 覆盖到运行记录、切在成对边界上也可以。
+    expect(await recall({ compaction: { upTo: 4, summary: 's' } })).toEqual({
+      compaction: { upTo: 4, summary: 's' },
+    })
   })
 
-  it('AC-005 falls back to the full view when the memory fails', async () => {
+  it('AC-005 drops a compaction that splits a tool call from its result', async () => {
+    const logs: string[] = []
+    expect(await recall({ compaction: { upTo: 3, summary: 's' }, notice: 'n' }, logs)).toEqual({
+      failed: true,
+      notice: 'n',
+    })
+    expect(logs).toEqual(['记忆的压缩不合格，沿用上一步的压缩：切点拆开了工具调用与结果'])
+  })
+
+  it('AC-005 drops a compaction past the end of the given messages', async () => {
+    const logs: string[] = []
+    expect(await recall({ compaction: { upTo: 6, summary: 's' } }, logs)).toEqual({ failed: true })
+    expect(logs).toEqual(['记忆的压缩不合格，沿用上一步的压缩：upTo 6 超出了 5 条消息'])
+  })
+
+  it('AC-005 compacts nothing when the memory fails', async () => {
     const failing = memoryOf(async () => Promise.reject(new Error('summarizer down')))
     const logs: string[] = []
     const view = await recallView(failing, memoryState, {
       clock: new FakeClock(),
       log: (message) => logs.push(message),
     })
-    expect(view).toEqual({ history: memoryState.history, transcript: memoryState.transcript })
-    expect(logs).toEqual(['记忆出错，沿用完整视图：Error: summarizer down'])
+    expect(view).toEqual({ failed: true })
+    expect(logs).toEqual(['记忆出错，沿用上一步的压缩：Error: summarizer down'])
   })
 
-  describe('I3: the view keeps history and transcript unless a compaction says otherwise', () => {
-    const msg = (text: string): ModelMessage => ({ role: 'user', content: text })
-    const summary: ModelMessage = { role: 'system', content: '【前文摘要】' }
-    const state: MemoryState = {
-      ...memoryState,
-      history: [msg('h1'), msg('h2')],
-      transcript: [msg('t1'), msg('t2'), msg('t3')],
-    }
-    const compaction = (replaced: [number, number]) => ({ replaced, summary: 's', anchorsKept: 0 })
-    const recall = (view: MemoryView) =>
-      recallView(
-        memoryOf(async () => view),
-        state,
-        { clock: new FakeClock() },
-      )
+  it('AC-007 gives the memory deep copies: changing a message leaves the run untouched', async () => {
+    const original = structuredClone([memoryState.history, memoryState.transcript])
+    await recallView(
+      memoryOf(async (s) => {
+        ;(s.history[0] as { content: string }).content = '改写'
+        const call = s.transcript[0] as { content: Array<{ input: unknown }> }
+        call.content[0]!.input = { q: '改写' }
+        return {}
+      }),
+      memoryState,
+      { clock: new FakeClock() },
+    )
+    expect([memoryState.history, memoryState.transcript]).toEqual(original)
+  })
 
-    it.each<[string, MemoryView]>([
-      ['the inputs as they are', { history: state.history, transcript: state.transcript }],
-      [
-        'a warning appended after the transcript',
-        { history: state.history, transcript: [...state.transcript, summary] },
-      ],
-      [
-        'a compaction inside the history',
-        {
-          history: [summary, msg('h2')],
-          transcript: state.transcript,
-          compaction: compaction([0, 1]),
-        },
-      ],
-      [
-        'a compaction across the boundary',
-        { history: [summary], transcript: [msg('t2'), msg('t3')], compaction: compaction([0, 3]) },
-      ],
-      [
-        'a compaction whose range runs past the end',
-        { history: [summary], transcript: [], compaction: compaction([0, 9]) },
-      ],
-    ])('accepts %s', async (_name, view) => {
-      expect(await recall(view)).toBe(view)
-    })
-
-    it.each<[string, MemoryView]>([
-      ['a dropped message', { history: state.history, transcript: [msg('t1'), msg('t3')] }],
-      [
-        'an inserted message',
-        { history: state.history, transcript: [msg('t1'), summary, msg('t2'), msg('t3')] },
-      ],
-      [
-        'a rewritten message',
-        { history: state.history, transcript: [msg('t1'), msg('t2'), msg('x')] },
-      ],
-      [
-        'a transcript message moved before the task input',
-        { history: [...state.history, msg('t1')], transcript: [msg('t2'), msg('t3')] },
-      ],
-      [
-        'a message appended to the history',
-        { history: [...state.history, summary], transcript: state.transcript },
-      ],
-      [
-        'a change outside the declared compaction',
-        {
-          history: [summary, msg('h2')],
-          transcript: [msg('t1'), msg('t3')],
-          compaction: compaction([0, 1]),
-        },
-      ],
-      [
-        'an invalid compaction range',
-        { history: state.history, transcript: state.transcript, compaction: compaction([3, 1]) },
-      ],
-    ])('rejects %s', async (_name, view) => {
-      await expect(recall(view)).rejects.toThrow('记忆视图改写了')
-    })
-
-    it('rejects a memory that drops a message from the arrays it was given', async () => {
-      const fresh = { ...state, history: [...state.history], transcript: [...state.transcript] }
-      const inPlace = memoryOf(async (s) => {
-        s.transcript.splice(1, 1)
-        return { history: s.history, transcript: s.transcript }
-      })
-      await expect(recallView(inPlace, fresh, { clock: new FakeClock() })).rejects.toThrow(
-        '记忆视图改写了',
-      )
-    })
+  it('I3 gives the memory copies: changing them leaves the run untouched', async () => {
+    const state = { ...memoryState, transcript: [...memoryState.transcript] }
+    const before = [...state.transcript]
+    await recallView(
+      memoryOf(async (s) => {
+        s.transcript.splice(0, 2)
+        return {}
+      }),
+      state,
+      { clock: new FakeClock() },
+    )
+    expect(state.transcript).toEqual(before)
   })
 
   it('falls back to the full view when the memory times out', async () => {
@@ -270,11 +222,8 @@ describe('recallView', () => {
       { clock, timeoutMs: 100, log: (message) => logs.push(message) },
     )
     await clock.tick(100)
-    expect(await pending).toEqual({
-      history: memoryState.history,
-      transcript: memoryState.transcript,
-    })
-    expect(logs).toEqual(['记忆出错，沿用完整视图：超时'])
+    expect(await pending).toEqual({ failed: true })
+    expect(logs).toEqual(['记忆出错，沿用上一步的压缩：超时'])
   })
 
   it('gives the memory 120 seconds by default', async () => {

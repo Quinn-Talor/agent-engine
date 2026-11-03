@@ -197,7 +197,7 @@ describe('regressionReplay', () => {
     expect(r.result.status).toBe('completed')
     const live = draws.splice(0)
     const report = await regressionReplay(
-      base(r, { deliverable: { ...defaults().deliverable, checks: [grounded] }, task }),
+      base(r, { deliverable: { ...defaults().deliverable, checks: [grounded] } }),
     )
     expect(report.deliveries).toEqual([
       expect.objectContaining({ expected: 'delivered', actual: 'delivered', same: true }),

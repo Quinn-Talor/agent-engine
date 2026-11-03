@@ -77,6 +77,8 @@ function harness(opts: {
     defaults: defaults(),
     fingerprint: 'engine-fp',
     environmentOf: (e) => envs.get(e),
+    sessions: new Map(),
+    recovered: Promise.resolve(),
   }
   const config: EnvironmentConfig = {
     name: 'test',
@@ -150,6 +152,7 @@ describe('startRun', () => {
       engine: { fingerprint: 'engine-fp' },
       model: 'fake:main',
       contextLimit: 128_000,
+      outputReserve: 8192,
       queuedMs: 0,
       rootRunId: run.runId,
       schemaVersion: 1,
@@ -157,6 +160,26 @@ describe('startRun', () => {
     const late: RunEvent[] = []
     run.subscribe({ onEvent: (e) => void late.push(e) }, { fromSeq: 7 })
     await vi.waitFor(() => expect(types(late)).toEqual(['delivery_checked', 'run_ended']))
+  })
+
+  it('AC-007 reserves the declared output, at most half of a small window', async () => {
+    const h = harness({
+      replies: [{ text: 'unused' }],
+      models: (clock) => [
+        fakeModel({
+          model: 'tiny',
+          clock,
+          replies: [{ text: 'ok' }],
+          capabilities: { contextLimit: 10_000, maxOutputTokens: 8192 },
+        }),
+      ],
+    })
+    const { run } = h.start(agentOf({ model: { prefer: 'fake:tiny' } }))
+    await run.result
+    const [started] = await h.read(run.runId)
+    expect(started).toMatchObject({ t: 'run_started', contextLimit: 10_000, outputReserve: 5000 })
+    // 预留被压到窗口的一半时，请求的输出上限也跟着压，输入 + 输出才放得进窗口。
+    expect(h.others[0]!.inputs[0]!.maxOutputTokens).toBe(5000)
   })
 
   it('AC-016 keeps running when a subscriber fails and forwards text deltas', async () => {
@@ -414,32 +437,21 @@ describe('startRun', () => {
     const h = harness({ replies: [{ text: '答案' }], memory: failing })
     const result = await h.start().run.result
     expect(result).toMatchObject({ status: 'completed', text: '答案' })
-    expect(h.logs.some((l) => l.message.includes('记忆出错，沿用完整视图：Error: disk full'))).toBe(
-      true,
-    )
+    expect(
+      h.logs.some((l) => l.message.includes('记忆出错，沿用上一步的压缩：Error: disk full')),
+    ).toBe(true)
   })
 
-  it('AC-020 fails with engine_error when memory breaks tool pairs', async () => {
+  it('AC-020 ignores a compaction outside the given messages and keeps running', async () => {
     const broken: Memory = {
       id: 'broken',
       version: '1',
-      start: () => ({
-        recall: async (s) => ({
-          history: s.history,
-          transcript: [
-            {
-              role: 'assistant',
-              content: [{ type: 'tool-call', toolCallId: 'x', toolName: 't', input: {} }],
-            },
-          ],
-        }),
-      }),
+      start: () => ({ recall: async () => ({ compaction: { upTo: 9, summary: 's' } }) }),
     }
-    const h = harness({ replies: [{ text: 'never' }], memory: broken })
+    const h = harness({ replies: [{ text: '答案' }], memory: broken })
     const result = await h.start().run.result
-    expect(result).toMatchObject({ status: 'failed', code: 'engine_error' })
-    expect(result.error?.message).toContain('成对')
-    expect(h.model.inputs).toHaveLength(0)
+    expect(result).toMatchObject({ status: 'completed', text: '答案' })
+    expect(h.logs.some((l) => l.message.includes('记忆的压缩不合格，沿用上一步的压缩'))).toBe(true)
   })
 
   it('AC-020 fails capability conflicts at prepare', async () => {

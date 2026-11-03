@@ -1,7 +1,6 @@
 // 组件返回值的形状校验（设计 §4.4）：返回值不合格即视为组件出错，由调用方按该组件的出错方式降级。
 // 每个函数返回问题描述；合格时返回 undefined。testing/conformance.ts 用同一套规则断言守卫意见与权限结果。
 
-const ROLES = new Set(['user', 'assistant', 'system', 'tool'])
 const NOTICE_ROLES = new Set(['system', 'user'])
 
 const isObject = (v: unknown): v is Record<string, unknown> =>
@@ -65,28 +64,17 @@ export function checkResultIssue(value: unknown): string | undefined {
   return undefined
 }
 
-const messagesIssue = (list: unknown, name: string): string | undefined => {
-  if (!Array.isArray(list)) return `${name} 必须是数组`
-  const bad = list.findIndex((m) => !isObject(m) || !ROLES.has(m.role as string))
-  return bad >= 0 ? `${name}[${bad}] 需要 user、assistant、system 或 tool 的 role` : undefined
-}
-
-/** 记忆视图：history 与 transcript 为消息数组；compaction 可选。 */
+/** 记忆的决定：compaction 可选（upTo 为正整数、summary 非空）；notice 可选。 */
 export function memoryViewIssue(value: unknown): string | undefined {
-  if (!isObject(value)) return '记忆视图必须是对象'
-  const issue =
-    messagesIssue(value.history, 'history') ?? messagesIssue(value.transcript, 'transcript')
-  if (issue) return issue
+  if (!isObject(value)) return '记忆的返回值必须是对象'
   const c = value.compaction
-  if (c === undefined) return undefined
-  const ok =
-    isObject(c) &&
-    Array.isArray(c.replaced) &&
-    c.replaced.length === 2 &&
-    c.replaced.every((n) => typeof n === 'number') &&
-    isString(c.summary) &&
-    typeof c.anchorsKept === 'number'
-  return ok ? undefined : 'compaction 需要 replaced（两个数字）、summary 与 anchorsKept'
+  if (c !== undefined) {
+    if (!isObject(c) || !Number.isInteger(c.upTo) || (c.upTo as number) < 1) {
+      return 'compaction.upTo 必须是正整数'
+    }
+    if (!isString(c.summary) || c.summary.length === 0) return 'compaction.summary 必须是非空字符串'
+  }
+  return isOptional(value.notice, isString) ? undefined : 'notice 必须是字符串'
 }
 
 /** 权限裁决：'allow'、`{ deny, unavailable? }` 或 `{ ask }`。 */

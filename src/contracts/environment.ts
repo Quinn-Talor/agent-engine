@@ -42,8 +42,18 @@ export interface EnvironmentConfig {
   caps?: Caps
 }
 
+/** 一次运行的安排：模型、运行 id，以及它属于哪个会话（会话方案 §4）。 */
+export interface Assignment {
+  model?: ModelRef
+  runId?: string
+  /** 会话 id：这次运行是会话的一轮，前文由引擎从会话日志推导，任务不能再给 history。 */
+  session?: string
+  /** 接在会话里哪一轮之后（runId）；`null` 从头开始；不写时取会话里最新的一轮。 */
+  continues?: string | null
+}
+
 export interface Environment {
   readonly name: string
   readonly fingerprint: string
-  start(agent: Agent, task: Task, assignment?: { model?: ModelRef; runId?: string }): Run
+  start(agent: Agent, task: Task, assignment?: Assignment): Run
 }

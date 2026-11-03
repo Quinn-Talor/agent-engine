@@ -43,7 +43,10 @@ export const toolSnapshot = (name: string, extra: Record<string, unknown> = {}) 
 export const runStarted = (patch: Partial<Of<'run_started'>> = {}): Of<'run_started'> => ({
   t: 'run_started',
   agent: { id: 'agent', fingerprint: 'agent-fp' },
-  task: { fingerprint: 'task-fp' },
+  task: {
+    fingerprint: 'task-fp',
+    content: 'sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',
+  },
   environment: { name: 'env', fingerprint: 'env-fp', principalReachable: true },
   engine: { fingerprint: 'engine-fp' },
   capabilities: [
@@ -58,6 +61,7 @@ export const runStarted = (patch: Partial<Of<'run_started'>> = {}): Of<'run_star
   unavailable: [],
   model: 'fake:model',
   contextLimit: 10_000,
+  outputReserve: 0,
   queuedMs: 0,
   rootRunId: 'r1',
   schemaVersion: 1,
@@ -140,6 +144,7 @@ export const evaluated = (
   observation: observation({ step, ...obs }),
   opinions,
   verdict,
+  decidedAt: 0,
 })
 
 /** 守卫意见记录：warn 记为带一条提示的继续。 */

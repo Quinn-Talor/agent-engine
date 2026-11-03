@@ -14,6 +14,7 @@ export interface ViewParts {
   tail: Segment[]
   tools: ModelToolSpec[]
   toolChoice?: 'auto' | 'none'
+  maxOutputTokens?: number
 }
 
 /** 纯文本的 system 段转为 system 消息；含图片或文件的段转为 user 消息，内容不丢。 */
@@ -25,6 +26,34 @@ export function segmentToMessage(segment: Segment): ModelMessage {
     }
   }
   return { role: 'user', content: segment.parts }
+}
+
+/** 压缩声明：前文 + 运行记录连起来的前 `upTo` 条换成一条摘要（设计 §9.3）。 */
+export interface Compaction {
+  upTo: number
+  summary: string
+}
+
+/** 摘要在视图里的样子：一条带固定标题的 system 消息。 */
+export function summaryMessage(summary: string): ModelMessage {
+  return { role: 'system', content: `【前文摘要】\n${summary}` }
+}
+
+/**
+ * 套上压缩声明之后的前文与运行记录。组装、会话的下一轮窗口与预览都用它，模型看到的前文只可能是
+ * 原样的前文，或者原样的前文套上一次已声明的压缩。覆盖到运行记录时前文只剩摘要；任务输入不在
+ * 编号里，布局仍把它放在摘要与剩下的运行记录之间。
+ */
+export function renderView(
+  history: readonly ModelMessage[],
+  transcript: readonly ModelMessage[],
+  compaction?: Compaction,
+): { history: ModelMessage[]; transcript: ModelMessage[] } {
+  if (!compaction) return { history: [...history], transcript: [...transcript] }
+  const summary = summaryMessage(compaction.summary)
+  return compaction.upTo <= history.length
+    ? { history: [summary, ...history.slice(compaction.upTo)], transcript: [...transcript] }
+    : { history: [summary], transcript: transcript.slice(compaction.upTo - history.length) }
 }
 
 export function layout(parts: ViewParts): ModelInput {
@@ -51,5 +80,6 @@ export function layout(parts: ViewParts): ModelInput {
     cacheBreakpoints: [...breakpoints].sort((a, b) => a - b),
   }
   if (parts.toolChoice !== undefined) input.toolChoice = parts.toolChoice
+  if (parts.maxOutputTokens !== undefined) input.maxOutputTokens = parts.maxOutputTokens
   return input
 }

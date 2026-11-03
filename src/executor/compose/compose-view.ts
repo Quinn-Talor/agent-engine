@@ -1,11 +1,11 @@
-// ① 组装的前半部分：预演本步追加的提示与引导，渲染运行记录，取得记忆给出的视图并复核成对（I2）。
+// ① 组装的前半部分：预演本步追加的提示与引导，渲染运行记录，取得记忆的压缩决定并复核成对（I2）。
 
 import type { Clock, ModelMessage } from '../../contracts/common.js'
 import type { MemoryState, MemoryView } from '../../contracts/component.js'
 import type { BlobRef, RunEvent, RunEventBody } from '../../contracts/events.js'
 import { memoryViewIssue } from '../../core/definition/component-results.js'
-import { canonicalJson } from '../../core/definition/hash.js'
 import { transcriptMessages } from '../../core/log/projections.js'
+import { renderView } from '../../core/run/layout.js'
 import { apply, type RunState } from '../../core/run/state.js'
 import { callComponent, MEMORY_TIMEOUT_MS } from '../call-component.js'
 
@@ -102,59 +102,27 @@ export function checkPairs(messages: readonly ModelMessage[]): string[] {
   return violations
 }
 
-/**
- * 复核前缀（I3）：history 与运行记录原样保留；声明了压缩时，只有 `replaced` 区间（history + 运行记录
- * 连在一起的下标，左闭右开）可以换成别的消息。保留下来的消息不能跨过任务输入换位置；末尾可以追加消息
- * （如压缩冷却期间的警告，设计 §11），但追加的只能落在运行记录里。
- */
-function checkKept(
-  before: { messages: readonly string[]; history: number },
-  view: MemoryView,
-): string | undefined {
-  const input = before.messages
-  const shown = [...view.history, ...view.transcript].map((m) => canonicalJson(m))
-  const n = input.length
-  const inHistory = before.history
-  const shownHistory = view.history.length
-  let from = n
-  let to = n
-  if (view.compaction) {
-    const [a, b] = view.compaction.replaced
-    from = Math.max(0, Math.min(a, n))
-    to = Math.max(0, Math.min(b, n))
-    if (!(from <= to)) return `压缩区间 [${a}, ${b}) 不合法`
-  }
-  const at = (i: number, v: number) => shown[v] === input[i] && i < inHistory === v < shownHistory
-  for (let i = 0; i < from; i++) if (!at(i, i)) return `第 ${i} 条消息被改写`
-  // 被替换的区间换成了几条消息不限；没有声明压缩时不能多出消息。
-  const kept = n - to
-  const last = view.compaction ? shown.length - kept : from
-  for (let p = from; p <= last; p++) {
-    let ok = shownHistory <= p + kept
-    for (let i = to; ok && i < n; i++) ok = at(i, p + i - to)
-    if (ok) return undefined
-  }
-  return view.compaction
-    ? `压缩区间 [${from}, ${to}) 之外的消息被改写`
-    : '没有声明压缩却删除、改写或插入了消息'
-}
+/** 记忆的决定；`failed` 表示这一步记忆没有给出可用的决定，组装沿用上一步生效的压缩。 */
+export type RecalledView = MemoryView & { failed?: true }
 
 /**
- * 记忆出错或超时：沿用完整视图（没有压缩），超出上下文时由组装环节按超限停止。视图破坏成对、
- * 改写了 history 与运行记录时抛错，由驱动转为 engine_error（设计 §4.4）。
+ * 记忆给出压缩决定（设计 §9.3），视图由 renderView 渲染。记忆拿到的是深拷贝，改了也不影响运行。
+ * 出错、超时、形状不合格、压缩超出给定的消息、切点拆开成对时返回 `failed`（会话方案 §8）：压缩一旦
+ * 声明，记忆失败不能让它退回；提示照常保留。
  */
 export async function recallView(
   memory: { recall(state: MemoryState): Promise<MemoryView> },
   memoryState: MemoryState,
   opts: { clock: Clock; timeoutMs?: number; log?: (message: string) => void },
-): Promise<MemoryView> {
-  // 调用前记下输入：记忆就地改了传入的数组也查得出来。
-  const before = {
-    messages: [...memoryState.history, ...memoryState.transcript].map((m) => canonicalJson(m)),
-    history: memoryState.history.length,
+): Promise<RecalledView> {
+  const { history, transcript } = memoryState
+  const copy: MemoryState = {
+    ...memoryState,
+    history: structuredClone(history),
+    transcript: structuredClone(transcript),
+    turnStarts: [...memoryState.turnStarts],
   }
-  // 形状不合格与出错一样沿用完整视图；拆开成对、改写记录仍按设计 §4.4 让运行失败。
-  const outcome = await callComponent(() => memory.recall(memoryState), {
+  const outcome = await callComponent(() => memory.recall(copy), {
     clock: opts.clock,
     timeoutMs: opts.timeoutMs ?? MEMORY_TIMEOUT_MS,
     validate: memoryViewIssue,
@@ -165,12 +133,25 @@ export async function recallView(
       : outcome.timedOut
         ? '超时'
         : String(outcome.error)
-    opts.log?.(`记忆出错，沿用完整视图：${why}`)
-    return { history: [...memoryState.history], transcript: [...memoryState.transcript] }
+    opts.log?.(`记忆出错，沿用上一步的压缩：${why}`)
+    return { failed: true }
   }
-  const violations = checkPairs([...outcome.value.history, ...outcome.value.transcript])
-  if (violations.length > 0) throw new Error(`记忆视图破坏了成对：${violations.join('；')}`)
-  const rewritten = checkKept(before, outcome.value)
-  if (rewritten) throw new Error(`记忆视图改写了 history 或运行记录：${rewritten}`)
-  return outcome.value
+  const { compaction, notice } = outcome.value
+  if (!compaction) return notice !== undefined ? { notice } : {}
+  const total = history.length + transcript.length
+  const rendered = renderView(history, transcript, compaction)
+  const issue =
+    compaction.upTo > total
+      ? `upTo ${compaction.upTo} 超出了 ${total} 条消息`
+      : checkPairs([...rendered.history, ...rendered.transcript]).length > 0
+        ? '切点拆开了工具调用与结果'
+        : undefined
+  if (issue) {
+    opts.log?.(`记忆的压缩不合格，沿用上一步的压缩：${issue}`)
+    return { failed: true, ...(notice !== undefined ? { notice } : {}) }
+  }
+  return {
+    compaction: { upTo: compaction.upTo, summary: compaction.summary },
+    ...(notice !== undefined ? { notice } : {}),
+  }
 }

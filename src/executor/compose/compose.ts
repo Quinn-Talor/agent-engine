@@ -1,14 +1,15 @@
-// ① 组装（设计 §3.5）：追加上一步留下的提示和委托人引导 → 记忆给出视图 → 工具呈现给出可见工具
-// → 固定布局 → 复核成对与前缀哈希 → 估算。step_started、intervention_applied、context_built 一次产出。
+// ① 组装（设计 §3.5）：追加上一步留下的提示和委托人引导 → 工具呈现给出可见工具 → 记忆给出压缩决定
+// → 按决定渲染视图（renderView），还超限时丢掉会话前文里最早的整轮 → 固定布局 → 复核前缀哈希 → 估算。
+// step_started、intervention_applied、context_built 一次产出。
 
 import type { Clock, LogLevel, ModelMessage, Segment } from '../../contracts/common.js'
 import type { MemoryState, MemoryView, RunInfo, ToolboxState } from '../../contracts/component.js'
-import type { BlobRef, RunEventBody } from '../../contracts/events.js'
+import type { BlobRef, CompactionReason, RunEventBody } from '../../contracts/events.js'
 import type { ModelInput } from '../../contracts/model.js'
 import { visibleToolsIssue } from '../../core/definition/component-results.js'
 import { estimateMessages, estimateTools } from '../../core/run/estimate.js'
 import { canonicalJson, hashOf } from '../../core/definition/hash.js'
-import { layout, segmentToMessage } from '../../core/run/layout.js'
+import { layout, renderView, segmentToMessage, type Compaction } from '../../core/run/layout.js'
 import type { RunState } from '../../core/run/state.js'
 import { callComponent, failureDetail } from '../call-component.js'
 import { BlobCache, preview, recallView, renderTranscript, stepEvents } from './compose-view.js'
@@ -32,6 +33,10 @@ export interface ComposeDeps {
   componentTimeoutMs?: number
   /** 记忆的超时；默认 MEMORY_TIMEOUT_MS。 */
   memoryTimeoutMs?: number
+  /** 输出预留：输入上限 = 窗口 − 它，也是请求的 `maxOutputTokens`。 */
+  outputReserve: number
+  /** 会话的一轮：带入的摘要（history 第一条）、每一轮在 history 里的起点、放在尾部的副作用台账。 */
+  session?: { summary?: string; turnStarts: number[]; ledger?: Segment }
 }
 
 export interface ComposeResult {
@@ -46,6 +51,14 @@ export interface Composer {
   lastStep(state: RunState): Promise<ModelMessage[]>
 }
 
+const sameCompaction = (a: Compaction | undefined, b: Compaction | undefined): boolean =>
+  a?.upTo === b?.upTo && a?.summary === b?.summary
+
+const systemSegment = (text: string): Segment => ({
+  role: 'system',
+  parts: [{ type: 'text', text }],
+})
+
 export function unavailableSegment(
   unavailable: ReadonlyArray<{ capability: string; reason: string }>,
 ): Segment | undefined {
@@ -57,6 +70,8 @@ export function unavailableSegment(
 export function createComposer(deps: ComposeDeps): Composer {
   const blobs = new BlobCache((ref) => deps.getBlob(ref))
   let prefix: { stable: string; input: string } | undefined
+  /** 上一步生效的压缩：变化时才记原因与前后的 token。 */
+  let lastCompaction: Compaction | undefined
 
   const visibleTools = async (step: number, state: RunState): Promise<string[]> => {
     const all = [...deps.toolset.keys()]
@@ -121,21 +136,31 @@ export function createComposer(deps: ComposeDeps): Composer {
       )
       const inputMessages = deps.task.input.map(segmentToMessage)
       const unavailable = unavailableSegment(deps.unavailable)
-      const tail = [...deps.task.volatile, ...(unavailable ? [unavailable] : [])]
+      const tail = [
+        ...deps.task.volatile,
+        ...(deps.session?.ledger ? [deps.session.ledger] : []),
+        ...(unavailable ? [unavailable] : []),
+      ]
       const calibrate = (raw: number) => Math.ceil(raw * next.calibration)
 
-      const view = await recallView(
+      const history = deps.task.history
+      const inputLimit = deps.run.model.contextLimit - deps.outputReserve
+      const session = deps.session
+      const decision = await recallView(
         deps.memory,
         {
           step,
-          history: deps.task.history,
+          history,
           transcript,
           contextLimit: deps.run.model.contextLimit,
+          inputLimit,
           fixedTokens: calibrate(
             estimateMessages([...stable, ...inputMessages, ...tail.map(segmentToMessage)]) +
               estimateTools(tools),
           ),
           estimate: (messages) => calibrate(estimateMessages(messages)),
+          ...(session?.summary !== undefined ? { summary: session.summary } : {}),
+          turnStarts: session?.turnStarts ?? [],
         },
         {
           clock: deps.clock,
@@ -143,17 +168,66 @@ export function createComposer(deps: ComposeDeps): Composer {
           log: (message) => deps.log('warn', message),
         },
       )
+      const shownTail = decision.notice ? [...tail, systemSegment(decision.notice)] : tail
 
-      const input = layout({
-        notice: deps.notice,
-        instructions: deps.instructions,
-        capabilities: deps.capabilities,
-        history: view.history,
-        input: deps.task.input,
-        transcript: view.transcript,
-        tail,
-        tools,
-      })
+      const build = (compaction: Compaction | undefined) => {
+        const view = renderView(history, transcript, compaction)
+        const input = layout({
+          notice: deps.notice,
+          instructions: deps.instructions,
+          capabilities: deps.capabilities,
+          history: view.history,
+          input: deps.task.input,
+          transcript: view.transcript,
+          tail: shownTail,
+          tools,
+          maxOutputTokens: deps.outputReserve,
+        })
+        const estimate = calibrate(estimateMessages(input.messages) + estimateTools(input.tools))
+        return { view, input, estimate }
+      }
+
+      /**
+       * C（会话方案 §8）：压缩之后仍达到输入上限时，丢掉前文里最早的整轮，必要时丢到只剩摘要；摘要不变，
+       * 末尾加一行说明。不调用模型、不丢本轮的运行记录；丢完仍超限时由超限检查结束运行。
+       */
+      const dropEarliestTurns = (base: Compaction | undefined) => {
+        if (!session) return undefined
+        const from = base?.upTo ?? (session.summary !== undefined ? 1 : 0)
+        const summary = base?.summary ?? session.summary
+        if (from >= history.length) return undefined
+        const cuts = [
+          ...new Set([
+            ...session.turnStarts.filter((t) => t > from && t < history.length),
+            history.length,
+          ]),
+        ]
+        for (const cut of cuts) {
+          const turns = session.turnStarts.filter((t) => t >= from && t < cut).length
+          const line =
+            turns > 0
+              ? `[更早的 ${turns} 轮对话已省略，原文保留在会话日志]`
+              : '[更早的部分对话已省略，原文保留在会话日志]'
+          const compaction = { upTo: cut, summary: summary ? `${summary}\n\n${line}` : line }
+          const built = build(compaction)
+          // 只记录放得下的裁剪：丢到只剩摘要仍超限时不进日志，交给超限检查（会话方案 §8）。
+          if (built.estimate < inputLimit) return { compaction, built }
+        }
+        return undefined
+      }
+
+      // 记忆这一步没有给出可用的决定：沿用上一步生效的压缩（运行记录只增不减，它仍然成立）。
+      let compaction = decision.failed ? lastCompaction : decision.compaction
+      let reason: CompactionReason = step === 1 ? 'turn_start' : 'in_run'
+      let built = build(compaction)
+      if (built.estimate >= inputLimit) {
+        const dropped = dropEarliestTurns(compaction)
+        if (dropped) {
+          ;({ compaction, built } = dropped)
+          reason = 'overflow_drop'
+        }
+      }
+      const { input } = built
 
       // 前缀复核（I3）：须知、指令、能力说明与任务输入不参与压缩，必须与第一步相同。
       const hashes = { stable: hashOf(stable), input: hashOf(inputMessages) }
@@ -164,20 +238,27 @@ export function createComposer(deps: ComposeDeps): Composer {
 
       const messages: BlobRef[] = []
       for (const m of input.messages) messages.push(await deps.putBlob(canonicalJson(m)))
-      const compaction = view.compaction
+      const changed = !sameCompaction(compaction, lastCompaction)
+      const record = compaction
         ? {
-            replaced: view.compaction.replaced,
-            summary: await deps.putBlob(view.compaction.summary),
-            anchorsKept: view.compaction.anchorsKept,
+            upTo: compaction.upTo,
+            summary: await deps.putBlob(compaction.summary),
+            ...(changed
+              ? {
+                  reason,
+                  tokens: { before: build(lastCompaction).estimate, after: built.estimate },
+                }
+              : {}),
           }
         : undefined
+      lastCompaction = compaction
       const contextBuilt: RunEventBody = {
         t: 'context_built',
         step,
         messages,
         tools: visible,
-        estimate: calibrate(estimateMessages(input.messages) + estimateTools(input.tools)),
-        ...(compaction ? { compaction } : {}),
+        estimate: built.estimate,
+        ...(record ? { compaction: record } : {}),
       }
       return { events: [...bodies, contextBuilt], input, visible: new Set(visible) }
     },

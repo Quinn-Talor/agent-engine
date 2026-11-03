@@ -102,8 +102,8 @@ describe('component results that do not match their contract', () => {
 
   it.each([
     ['null', null],
-    ['{}', {}],
-    ['a transcript that is not a list', { history: [], transcript: 'x' }],
+    ['a compaction without a summary', { compaction: { upTo: 1, summary: '' } }],
+    ['a notice that is not text', { notice: 1 }],
   ])('AC-004 keeps the full view when memory returns %s', async (_label, view) => {
     const memory: Memory = {
       id: 'bad',
@@ -119,15 +119,13 @@ describe('component results that do not match their contract', () => {
     expect(h.warnings()).toHaveLength(1)
   })
 
-  it('AC-004 still fails the run when memory breaks tool pairs', async () => {
+  it('AC-004 keeps the pairs when a compaction would split a call from its result', async () => {
     const memory: Memory = {
-      id: 'drops-results',
+      id: 'splits-pairs',
       version: '1',
       start: () => ({
-        recall: async (s) => ({
-          history: s.history,
-          transcript: s.transcript.filter((m) => m.role !== 'tool'),
-        }),
+        // 第 2 步切在工具调用之后：结果会失去它的调用。
+        recall: async (s) => (s.step === 2 ? { compaction: { upTo: 1, summary: '查过了' } } : {}),
       }),
     }
     const lookup = fakeTool({ name: 'lookup', result: '数据' })
@@ -139,7 +137,8 @@ describe('component results that do not match their contract', () => {
       defineAgent({ id: 'a', instructions: [sys], capabilities: [tools([lookup])] }),
       defineTask({ input }),
     ).result
-    expect(result).toMatchObject({ status: 'failed', code: 'engine_error' })
+    expect(result).toMatchObject({ status: 'completed', text: '答案' })
+    expect(h.logs.some((l) => l.level === 'warn' && l.message.includes('切点拆开了'))).toBe(true)
   })
 
   it.each([

@@ -59,6 +59,24 @@ export function canonicalJson(value: unknown): string {
   return `{${entries.join(',')}}`
 }
 
+/** 还原规范 JSON 里的字节与转义过的键。 */
+function revive(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(revive)
+  if (typeof value !== 'object' || value === null) return value
+  const entries = Object.entries(value)
+  if (entries.length === 1 && entries[0]![0] === '$bytes' && typeof entries[0]![1] === 'string') {
+    return new Uint8Array(Buffer.from(entries[0]![1], 'base64'))
+  }
+  return Object.fromEntries(
+    entries.map(([key, item]) => [BYTES_KEY.test(key) ? key.slice(1) : key, revive(item)]),
+  )
+}
+
+/** `canonicalJson` 的逆运算：字节还原为 Uint8Array，`$$bytes` 一类的键去掉多加的 `$`。 */
+export function parseCanonical(text: string): unknown {
+  return revive(JSON.parse(text))
+}
+
 export function sha256Hex(data: string | Uint8Array): string {
   return createHash('sha256').update(data).digest('hex')
 }

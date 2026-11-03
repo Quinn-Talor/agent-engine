@@ -1,4 +1,5 @@
-// 测试工具入口（`agent-engine/testing`，设计 §13）：测试替身、运行与断言、一致性测试、故障注入、存储契约测试。
+// 测试工具入口（`agent-engine/testing`，设计 §13）：测试替身、运行与断言、一致性测试、故障注入、存储契约测试、
+// 会话日志的复核（I17）。
 
 export { archiveStoreContract } from './testing/archive-contract.js'
 export type { ContractCase } from './testing/archive-contract.js'
@@ -15,3 +16,4 @@ export { chaos } from './testing/chaos.js'
 export type { Chaos, ChaosFault } from './testing/chaos.js'
 export { conformance } from './testing/conformance.js'
 export type { ConformanceOptions } from './testing/conformance.js'
+export { sessionLogIssues } from './testing/session-log.js'

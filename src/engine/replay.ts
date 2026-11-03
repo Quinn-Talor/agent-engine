@@ -3,7 +3,7 @@
 // 用新的交付物与强制验收重新判定；轨迹本身不变，所以第一次分歧之后的比较只有参考价值。
 
 import type { Deliverable } from '../contracts/agent.js'
-import type { Clock } from '../contracts/common.js'
+import type { Clock, ModelMessage } from '../contracts/common.js'
 import type {
   Check,
   ComponentCtx,
@@ -16,7 +16,7 @@ import type {
 import type { BlobRef, RunEvent } from '../contracts/events.js'
 import type { ModelInput, ModelPrice } from '../contracts/model.js'
 import type { Task } from '../contracts/task.js'
-import { canonicalJson, sha256Hex } from '../core/definition/hash.js'
+import { canonicalJson, parseCanonical, sha256Hex } from '../core/definition/hash.js'
 import { buildCorpus, sideEffects } from '../core/log/projections.js'
 import { seededRandom } from '../core/run/random.js'
 import { apply, emptyUsage, initial, type RunState } from '../core/run/state.js'
@@ -31,8 +31,6 @@ export interface RegressionInput {
   deliverable: Deliverable & { fallback: Fallback }
   environmentChecks?: readonly Check[]
   price?: ModelPrice
-  /** 覆盖日志里记下的任务输入与 history（`run_started.task.content`）；旧日志没有记录时由调用方给出。 */
-  task?: Pick<Task, 'input' | 'history'>
 }
 
 export interface RegressionReport {
@@ -99,7 +97,7 @@ function runInfoOf(events: readonly RunEvent[]): RunInfo {
       ...(task.context !== undefined ? { context: task.context } : {}),
       ...(task.goal !== undefined ? { goal: task.goal } : {}),
     },
-    model: { ref: started.model, contextLimit: started.contextLimit ?? Number.POSITIVE_INFINITY },
+    model: { ref: started.model, contextLimit: started.contextLimit },
   }
 }
 
@@ -128,6 +126,8 @@ export async function regressionReplay(input: RegressionInput): Promise<Regressi
     return undefined
   }
 
+  const started = events.find((e): e is Of<'run_started'> => e.t === 'run_started')!
+  const signal = new AbortController().signal
   const contexts = new Map<string, ComponentCtx>()
   // 与运行时相同的种子随机数（run-context.ts）：按 runId 播种，所有组件共用一个序列。
   const random = seededRandom(parseInt(sha256Hex(run.runId).slice(0, 8), 16))
@@ -137,6 +137,12 @@ export async function regressionReplay(input: RegressionInput): Promise<Regressi
     ctx = {
       clock,
       random,
+      signal,
+      // 回放只知道运行模型的窗口与输出预留。
+      modelLimits: (ref) =>
+        ref === undefined || ref === started.model
+          ? { contextLimit: started.contextLimit, maxOutputTokens: started.outputReserve }
+          : undefined,
       async callModel(req) {
         const logged = take(`${source}/${req.purpose}`, true)
         if (!logged) return undefined
@@ -144,13 +150,14 @@ export async function regressionReplay(input: RegressionInput): Promise<Regressi
           text: await getBlob(logged.response),
           usage: logged.usage ?? emptyUsage(),
           model: run.model.ref,
+          finishReason: 'stop',
         }
       },
       async record<T>(name: string): Promise<T> {
         const logged = take(`${source}/${name}`, false)
         if (!logged) throw new Error('回放日志中没有这次调用')
-        // 日志里保存的是这次调用结果的 JSON。
-        return JSON.parse(await getBlob(logged.response)) as T
+        // 日志里保存的是这次调用结果的规范 JSON。
+        return parseCanonical(await getBlob(logged.response)) as T
       },
       log: () => undefined,
       host: () => {
@@ -164,12 +171,11 @@ export async function regressionReplay(input: RegressionInput): Promise<Regressi
   let state: RunState = initial({ runId: run.runId })
   const seen: RunEvent[] = []
   // 语料的构造与运行时一致（run-driver.ts）：任务输入、history、带工具名/副作用/是否出错的工具输出。
-  const contentRef = events.find((e): e is Of<'run_started'> => e.t === 'run_started')?.task.content
-  let content: Promise<Pick<Task, 'input' | 'history'> | undefined> | undefined
+  let content: Promise<{ input: Task['input']; history: ModelMessage[] }> | undefined
   const logged = () =>
-    (content ??= contentRef
-      ? getBlob(contentRef).then((text) => JSON.parse(text) as Pick<Task, 'input' | 'history'>)
-      : Promise.resolve(undefined))
+    (content ??= getBlob(started.task.content).then(
+      (text) => parseCanonical(text) as { input: Task['input']; history: ModelMessage[] },
+    ))
   const corpus = async (): Promise<Corpus> => {
     const effects = new Map(
       seen.flatMap((e) => (e.t === 'tool_finished' ? [[e.callId, e.effect] as const] : [])),
@@ -187,12 +193,8 @@ export async function regressionReplay(input: RegressionInput): Promise<Regressi
         })
       }
     }
-    const content = input.task ?? (await logged())
-    return buildCorpus({
-      input: content?.input ?? [],
-      history: content?.history ?? [],
-      toolOutputs,
-    })
+    const content = await logged()
+    return buildCorpus({ input: content.input, history: content.history, toolOutputs })
   }
   const evaluator = createEvaluator({
     run,
@@ -233,8 +235,8 @@ export async function regressionReplay(input: RegressionInput): Promise<Regressi
     now = e.at
     const batch = starts.get(i)
     if (batch?.kind === 'evaluate') {
-      // 按记下的判定时刻重算剩余时长；旧日志没有时用批次的写入时间。
-      now = batch.logged.decidedAt ?? e.at
+      // 按记下的判定时刻重算剩余时长。
+      now = batch.logged.decidedAt
       const produced = await evaluator.evaluate(state)
       const actual = (produced[0] as Of<'evaluated'>).verdict
       const same = canonicalJson(actual) === canonicalJson(batch.logged.verdict)

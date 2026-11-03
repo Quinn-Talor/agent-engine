@@ -146,4 +146,6 @@ export interface SideModelResponse {
   text: string
   usage: NormalizedUsage
   model: ModelRef
+  /** `length` 表示输出被截断。 */
+  finishReason: FinishReason
 }

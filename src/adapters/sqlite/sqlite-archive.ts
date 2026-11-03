@@ -1,13 +1,20 @@
 // SQLite 运行档案（设计 §8.5）：与内存档案共用存储契约。WAL、synchronous=NORMAL、busy_timeout；一次 append
 // 是一个事务，seq 必须连续；run_started、step_ended、run_ended 时更新 runs；超过 4KB 的 blob 用 gzip；
 // 保留按执行环境配置天数，固定的运行永久保留，清理后对 blob 做标记清除（最近写过的 blob 不清除）。
-// 表结构版本记在 meta.schema_version：打开时拒绝更新版本写的文件，旧文件补齐缺少的列。
+// 表结构版本记在 meta.schema_version：版本不同的文件拒绝打开，不做迁移。会话按整体过期与删除（会话方案 §13）。
 // better-sqlite3 是可选的 peer 依赖：调用 sqliteArchive() 时才加载（方案 D4）。
 
 import { createRequire } from 'node:module'
 import { gunzipSync, gzipSync } from 'node:zlib'
 import type BetterSqlite3 from 'better-sqlite3'
-import { SCHEMA_VERSION, sha256Hex, summarize, systemClock, upcastEvent } from '../../sdk.js'
+import {
+  expiredRuns,
+  SCHEMA_VERSION,
+  sha256Hex,
+  summarize,
+  systemClock,
+  upcastEvent,
+} from '../../sdk.js'
 import type {
   ArchiveStore,
   BlobRef,
@@ -24,8 +31,8 @@ const DAY_MS = 86_400_000
 /** putBlob 之后、引用它的事件写入之前的宽限期：运行可能刚去重拿到引用、还没写进事件。 */
 const BLOB_GRACE_MS = DAY_MS
 const BUSY_TIMEOUT_MS = 5000
-/** 表结构版本：2 起 runs 带 usage_json、blobs 带 touched_at。 */
-const STORE_VERSION = 2
+/** 表结构版本：不同版本的文件拒绝打开（不迁移），删除后重建。 */
+const STORE_VERSION = 3
 const COMPRESS_ABOVE = 4096
 const BLOB_REF = /sha256:[0-9a-f]{64}/g
 const SUMMARY_EVENTS = new Set<RunEvent['t']>(['run_started', 'step_ended', 'run_ended'])
@@ -38,7 +45,8 @@ CREATE TABLE IF NOT EXISTS runs (
   status TEXT, code TEXT, started_at INTEGER NOT NULL, ended_at INTEGER, steps INTEGER NOT NULL, tool_calls INTEGER NOT NULL,
   input_tokens INTEGER NOT NULL, output_tokens INTEGER NOT NULL, cache_read INTEGER NOT NULL, cache_write INTEGER NOT NULL,
   memory_tokens INTEGER NOT NULL, supervision_tokens INTEGER NOT NULL, cost REAL,
-  pinned INTEGER NOT NULL DEFAULT 0, schema_version INTEGER NOT NULL, usage_json TEXT NOT NULL
+  pinned INTEGER NOT NULL DEFAULT 0, schema_version INTEGER NOT NULL, usage_json TEXT NOT NULL,
+  session TEXT, turn INTEGER, continues TEXT
 );
 CREATE TABLE IF NOT EXISTS events (
   run_id TEXT NOT NULL, seq INTEGER NOT NULL, type TEXT NOT NULL, at INTEGER NOT NULL, payload TEXT NOT NULL,
@@ -51,6 +59,7 @@ CREATE INDEX IF NOT EXISTS runs_parent ON runs(parent_run_id);
 CREATE INDEX IF NOT EXISTS runs_root ON runs(root_run_id);
 CREATE INDEX IF NOT EXISTS runs_agent ON runs(agent_id, agent_version, started_at);
 CREATE INDEX IF NOT EXISTS runs_environment ON runs(environment, status, started_at);
+CREATE INDEX IF NOT EXISTS runs_session ON runs(session, turn);
 `
 
 interface RunRow {
@@ -65,6 +74,9 @@ interface RunRow {
   agent_fp: string
   model: string
   subject: string | null
+  session: string | null
+  turn: number | null
+  continues: string | null
   status: RunSummary['status'] | null
   code: string | null
   started_at: number
@@ -91,6 +103,9 @@ function summaryOf(row: RunRow): RunSummary {
     agentFingerprint: row.agent_fp,
     model: row.model,
     ...(row.subject !== null ? { subject: row.subject } : {}),
+    ...(row.session !== null ? { session: row.session } : {}),
+    ...(row.turn !== null ? { turn: row.turn } : {}),
+    ...(row.continues !== null ? { continues: row.continues } : {}),
     ...(row.status !== null ? { status: row.status } : {}),
     ...(row.code !== null ? { code: row.code } : {}),
     startedAt: row.started_at,
@@ -108,6 +123,7 @@ function filterSql(f: RunFilter): { where: string; params: unknown[] } {
   const params: unknown[] = []
   const eq: Array<[string, unknown]> = [
     ['subject', f.subject],
+    ['session', f.session],
     ['environment', f.environment],
     ['agent_id', f.agentId],
     ['status', f.status],
@@ -130,29 +146,21 @@ function filterSql(f: RunFilter): { where: string; params: unknown[] } {
   return { where: clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '', params }
 }
 
-/** 旧文件缺少的列（迁移只加列，可重复执行）；usage_json 先填 '{}'，随后从 events 重建摘要。 */
-const ADDED_COLUMNS: Array<[table: string, column: string, ddl: string]> = [
-  ['runs', 'usage_json', "usage_json TEXT NOT NULL DEFAULT '{}'"],
-  ['blobs', 'touched_at', 'touched_at INTEGER NOT NULL DEFAULT 0'],
-]
-
-/** 检查表结构版本并补齐旧文件缺少的列；返回文件原来的版本（新文件为 0）。 */
-function migrateColumns(db: BetterSqlite3.Database): number {
+/** 新文件记下表结构版本；已有文件的版本必须相同，否则拒绝打开。 */
+function checkVersion(db: BetterSqlite3.Database): void {
   const row = db.prepare("SELECT value FROM meta WHERE key = 'schema_version'").get() as
     { value: string } | undefined
-  const version = row ? Number(row.value) : 0
-  if (version > STORE_VERSION) {
+  if (!row) {
+    db.prepare("INSERT INTO meta (key, value) VALUES ('schema_version', ?)").run(
+      String(STORE_VERSION),
+    )
+    return
+  }
+  if (Number(row.value) !== STORE_VERSION) {
     throw new Error(
-      `archive: 档案文件的表结构版本 ${version} 比本版本支持的 ${STORE_VERSION} 新，请升级引擎`,
+      `archive: 档案文件的表结构版本 ${row.value} 与本版本的 ${STORE_VERSION} 不一致，请删除后重建`,
     )
   }
-  for (const [table, column, ddl] of ADDED_COLUMNS) {
-    const columns = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>
-    if (!columns.some((c) => c.name === column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${ddl}`)
-  }
-  if (version < STORE_VERSION)
-    db.exec('UPDATE blobs SET touched_at = created_at WHERE touched_at = 0')
-  return version
 }
 
 export function sqliteArchive(opts: {
@@ -165,14 +173,15 @@ export function sqliteArchive(opts: {
   const Database = createRequire(import.meta.url)('better-sqlite3') as typeof BetterSqlite3
   const clock = opts.clock ?? systemClock()
   const db = new Database(opts.file)
-  let version: number
   try {
     // 读者与写者并存（单写多读）：遇到锁先等待，不立即报 SQLITE_BUSY。
     db.pragma(`busy_timeout = ${BUSY_TIMEOUT_MS}`)
     db.pragma('journal_mode = WAL')
     db.pragma('synchronous = NORMAL')
+    // 先查版本再建表：版本不同的文件不能被这个版本的建表语句改动。
+    db.exec('CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)')
+    checkVersion(db)
     db.exec(SCHEMA)
-    version = migrateColumns(db)
   } catch (error) {
     db.close()
     throw error
@@ -192,10 +201,11 @@ export function sqliteArchive(opts: {
   const upsertRun = db.prepare(`
     INSERT INTO runs (run_id, root_run_id, parent_run_id, environment, environment_fp, engine_fp, agent_id, agent_version,
       agent_fp, model, subject, status, code, started_at, ended_at, steps, tool_calls, input_tokens, output_tokens,
-      cache_read, cache_write, memory_tokens, supervision_tokens, cost, schema_version, usage_json)
+      cache_read, cache_write, memory_tokens, supervision_tokens, cost, schema_version, usage_json, session, turn, continues)
     VALUES (@run_id, @root_run_id, @parent_run_id, @environment, @environment_fp, @engine_fp, @agent_id, @agent_version,
       @agent_fp, @model, @subject, @status, @code, @started_at, @ended_at, @steps, @tool_calls, @input_tokens, @output_tokens,
-      @cache_read, @cache_write, @memory_tokens, @supervision_tokens, @cost, @schema_version, @usage_json)
+      @cache_read, @cache_write, @memory_tokens, @supervision_tokens, @cost, @schema_version, @usage_json,
+      @session, @turn, @continues)
     ON CONFLICT(run_id) DO UPDATE SET root_run_id = excluded.root_run_id, parent_run_id = excluded.parent_run_id,
       environment = excluded.environment, environment_fp = excluded.environment_fp, engine_fp = excluded.engine_fp,
       agent_id = excluded.agent_id, agent_version = excluded.agent_version, agent_fp = excluded.agent_fp,
@@ -204,7 +214,8 @@ export function sqliteArchive(opts: {
       tool_calls = excluded.tool_calls, input_tokens = excluded.input_tokens, output_tokens = excluded.output_tokens,
       cache_read = excluded.cache_read, cache_write = excluded.cache_write, memory_tokens = excluded.memory_tokens,
       supervision_tokens = excluded.supervision_tokens, cost = excluded.cost,
-      schema_version = excluded.schema_version, usage_json = excluded.usage_json`)
+      schema_version = excluded.schema_version, usage_json = excluded.usage_json,
+      session = excluded.session, turn = excluded.turn, continues = excluded.continues`)
 
   const allEvents = (runId: string): RunEvent[] =>
     (eventsOf.all(runId, 1) as Array<{ payload: string }>).map(
@@ -229,6 +240,9 @@ export function sqliteArchive(opts: {
       agent_fp: summary.agentFingerprint,
       model: summary.model,
       subject: summary.subject ?? null,
+      session: summary.session ?? null,
+      turn: summary.turn ?? null,
+      continues: summary.continues ?? null,
       status: summary.status ?? null,
       code: summary.code ?? null,
       started_at: summary.startedAt,
@@ -247,19 +261,6 @@ export function sqliteArchive(opts: {
     })
   }
 
-  // 迁移收尾：从 events 重建补列后的摘要，再记下表结构版本。
-  if (version < STORE_VERSION) {
-    db.transaction(() => {
-      const stale = db.prepare("SELECT run_id FROM runs WHERE usage_json = '{}'").all() as Array<{
-        run_id: string
-      }>
-      for (const r of stale) refreshSummary(r.run_id)
-      db.prepare(
-        "INSERT INTO meta (key, value) VALUES ('schema_version', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-      ).run(String(STORE_VERSION))
-    })()
-  }
-
   const appendBatch = db.transaction((runId: string, events: readonly RunEvent[]) => {
     const last = (lastSeq.get(runId) as { seq: number | null }).seq ?? 0
     events.forEach((e, i) => {
@@ -271,23 +272,15 @@ export function sqliteArchive(opts: {
     if (events.some((e) => SUMMARY_EVENTS.has(e.t))) refreshSummary(runId)
   })
 
-  const retainNow = db.transaction((policy: RetentionPolicy): RetainReport => {
-    const candidates = db
-      .prepare(
-        'SELECT run_id, environment, ended_at FROM runs WHERE ended_at IS NOT NULL AND pinned = 0',
-      )
-      .all() as Array<{ run_id: string; environment: string; ended_at: number }>
-    const expired = candidates.filter((r) => {
-      const days = policy.environments?.[r.environment] ?? policy.defaultDays
-      return r.ended_at < policy.now - days * DAY_MS
-    })
+  /** 删除运行，再清除只被它们引用、且在 `touchedBefore` 之前最后写入的 blob。 */
+  const remove = (ids: readonly string[], touchedBefore: number): RetainReport => {
     const released = new Set<string>()
-    for (const r of expired) {
-      for (const e of eventsOf.all(r.run_id, 1) as Array<{ payload: string }>) {
+    for (const runId of ids) {
+      for (const e of eventsOf.all(runId, 1) as Array<{ payload: string }>) {
         for (const ref of e.payload.match(BLOB_REF) ?? []) released.add(ref)
       }
-      db.prepare('DELETE FROM events WHERE run_id = ?').run(r.run_id)
-      db.prepare('DELETE FROM runs WHERE run_id = ?').run(r.run_id)
+      db.prepare('DELETE FROM events WHERE run_id = ?').run(runId)
+      db.prepare('DELETE FROM runs WHERE run_id = ?').run(runId)
     }
     const kept = new Set<string>()
     for (const e of db.prepare('SELECT payload FROM events').iterate() as Iterable<{
@@ -295,14 +288,56 @@ export function sqliteArchive(opts: {
     }>) {
       for (const ref of e.payload.match(BLOB_REF) ?? []) kept.add(ref)
     }
-    // 宽限期内写过（含去重命中）的 blob 保留：运行可能刚拿到引用、还没写进事件。
     let removedBlobs = 0
-    const deleteBlob = db.prepare('DELETE FROM blobs WHERE sha = ? AND touched_at < ?')
-    const recent = clock.now() - BLOB_GRACE_MS
+    const deleteBlob = db.prepare('DELETE FROM blobs WHERE sha = ? AND touched_at <= ?')
     for (const ref of released) {
-      if (!kept.has(ref)) removedBlobs += deleteBlob.run(ref, recent).changes
+      if (!kept.has(ref)) removedBlobs += deleteBlob.run(ref, touchedBefore).changes
     }
-    return { removedRuns: expired.length, removedBlobs }
+    return { removedRuns: ids.length, removedBlobs }
+  }
+
+  const retainNow = db.transaction((policy: RetentionPolicy): RetainReport => {
+    const rows = db
+      .prepare('SELECT run_id, root_run_id, session, environment, ended_at, pinned FROM runs')
+      .all() as Array<{
+      run_id: string
+      root_run_id: string
+      session: string | null
+      environment: string
+      ended_at: number | null
+      pinned: number
+    }>
+    const expired = expiredRuns(
+      rows.map((r) => ({
+        runId: r.run_id,
+        rootRunId: r.root_run_id,
+        ...(r.session !== null ? { session: r.session } : {}),
+        environment: r.environment,
+        ...(r.ended_at !== null ? { endedAt: r.ended_at } : {}),
+        pinned: r.pinned === 1,
+      })),
+      policy,
+    )
+    // 宽限期内写过（含去重命中）的 blob 保留：运行可能刚拿到引用、还没写进事件。
+    return remove([...expired], clock.now() - BLOB_GRACE_MS)
+  })
+
+  const deleteSessionNow = db.transaction((session: string): RetainReport => {
+    const members = db
+      .prepare(
+        `SELECT run_id, ended_at FROM runs WHERE session = ?
+          OR root_run_id IN (SELECT run_id FROM runs WHERE session = ?)`,
+      )
+      .all(session, session) as Array<{ run_id: string; ended_at: number | null }>
+    if (members.some((r) => r.ended_at === null)) {
+      throw new Error(`archive: 会话 ${session} 有没结束的运行，不能删除`)
+    }
+    // 会话结束之后没有被再次写入过的 blob 不受宽限期保护。
+    const lastEnded = Math.max(-Infinity, ...members.map((r) => r.ended_at!))
+    return remove(
+      members.map((r) => r.run_id),
+      Math.max(lastEnded, clock.now() - BLOB_GRACE_MS),
+    )
   })
 
   const store: ArchiveStore & { close(): void } = {
@@ -353,6 +388,9 @@ export function sqliteArchive(opts: {
     },
     async retain(policy) {
       return retainNow(policy)
+    },
+    async deleteSession(session) {
+      return deleteSessionNow(session)
     },
     close: () => db.close(),
   }

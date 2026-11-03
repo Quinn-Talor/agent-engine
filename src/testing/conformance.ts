@@ -4,7 +4,13 @@
 // 记忆的样本覆盖压缩触发线上下（设计 §11，默认 0.8）与超出窗口；副模型替身返回固定摘要，让记忆真的压缩。
 
 import assert from 'node:assert/strict'
-import { canonicalJson, guardOpinionIssue, permitResultIssue } from '../sdk.js'
+import {
+  canonicalJson,
+  guardOpinionIssue,
+  memoryViewIssue,
+  permitResultIssue,
+  renderView,
+} from '../sdk.js'
 import type { ModelMessage } from '../contracts/common.js'
 import type {
   Candidate,
@@ -16,7 +22,6 @@ import type {
   GuardOpinion,
   Memory,
   MemoryState,
-  MemoryView,
   Observation,
   PermissionRule,
   PermitResult,
@@ -32,7 +37,7 @@ import { FakeClock } from './fake-clock.js'
 export interface ConformanceOptions {
   /** 覆盖测试替身的组件上下文，例如 hook 组件需要 host('hook')。 */
   ctx?: Partial<ComponentCtx>
-  /** 记忆的压缩触发线：（固定占用 + 估算值）/ 模型窗口低于它的样本不得丢消息；缺省 0.8。 */
+  /** 记忆的压缩触发线：估算值 /（输入上限 − 固定占用）低于它的样本不得压缩；缺省 0.8。 */
   trigger?: number
 }
 
@@ -57,6 +62,8 @@ function contextOf(opts: ConformanceOptions = {}): ComponentCtx {
     host: (kind) => {
       throw new Error(`conformance: 没有能力宿主 ${kind}`)
     },
+    signal: new AbortController().signal,
+    modelLimits: () => ({ contextLimit: RUN.model.contextLimit, maxOutputTokens: 1000 }),
     ...opts.ctx,
   }
 }
@@ -148,9 +155,9 @@ const toolResult = (id: string, output: string, name = 'search'): ModelMessage =
 const estimate = (messages: ModelMessage[]) =>
   Math.ceil(messages.reduce((sum, m) => sum + JSON.stringify(m).length, 0) / 4)
 
-/** 视图占比：（固定占用 + 估算值）/ 模型窗口，与压缩触发线比较。 */
+/** 视图占比：前文 + 运行记录占可用空间（输入上限 − 固定占用）的比例，与压缩触发线比较。 */
 const ratioOf = (s: MemoryState) =>
-  (s.fixedTokens + s.estimate([...s.history, ...s.transcript])) / s.contextLimit
+  s.estimate([...s.history, ...s.transcript]) / (s.inputLimit - s.fixedTokens)
 
 const exchanges = (prefix: string, n: number) =>
   Array.from({ length: n }, (_, i) => [
@@ -170,8 +177,8 @@ function memorySamples(): MemoryState[] {
     { role: 'assistant', content: '大阪多云。' },
   ]
   const transcript = exchanges('t', 10)
-  const base = { step: 11, contextLimit: 4000, fixedTokens: 200, estimate }
-  return [
+  const base = { step: 11, contextLimit: 4000, fixedTokens: 200, estimate, turnStarts: [] }
+  const samples: Array<Omit<MemoryState, 'inputLimit'>> = [
     { ...base, history: [], transcript: [] },
     { ...base, history, transcript: [] },
     { ...base, history, transcript },
@@ -186,6 +193,8 @@ function memorySamples(): MemoryState[] {
     },
     { ...base, history, transcript, contextLimit: 1_200 },
   ]
+  // 样本不预留输出：输入上限就是窗口。
+  return samples.map((s) => ({ ...s, inputLimit: s.contextLimit }))
 }
 
 /** 压缩用的副模型替身：返回固定摘要（`opts.ctx.callModel` 可以覆盖）。 */
@@ -193,19 +202,8 @@ const summarize = async (): Promise<SideModelResponse> => ({
   text: '1. 意图：整理东京的天气\n2. 关键事实：东京晴 20 度',
   usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
   model: RUN.model.ref,
+  finishReason: 'stop',
 })
-
-/** 输入之外的消息只能是声明过的压缩摘要：system 消息，正文含 `compaction.summary`。 */
-function isDeclaredSummary(x: ModelMessage, view: MemoryView): boolean {
-  const summary = view.compaction?.summary
-  return (
-    x.role === 'system' &&
-    isString(x.content) &&
-    isString(summary) &&
-    summary.length > 0 &&
-    x.content.includes(summary)
-  )
-}
 
 function toolboxSamples(): ToolboxState[] {
   const prepared: ToolboxState['prepared'] = [
@@ -386,50 +384,46 @@ function memory(m: Memory, opts: ConformanceOptions = {}): ContractCase[] {
       },
     },
     {
-      name: 'memory: keeps tool calls paired with their results',
+      name: 'memory: returns a valid decision',
       async run() {
         for (const [n, s] of memorySamples().entries()) {
           const view = await recall(s)
-          assertPaired([...view.history, ...view.transcript], `${m.id} 样本 ${n}`)
-        }
-      },
-    },
-    {
-      name: 'memory: only shows messages from the history and the transcript',
-      async run() {
-        for (const [n, s] of memorySamples().entries()) {
-          const view = await recall(s)
-          const known = new Set([...s.history, ...s.transcript].map((x) => canonicalJson(x)))
-          for (const x of [...view.history, ...view.transcript]) {
-            assert.ok(
-              known.has(canonicalJson(x)) || isDeclaredSummary(x, view),
-              `${m.id} 样本 ${n}：视图里有输入之外、也不是已声明摘要的消息 ${canonicalJson(x)}`,
-            )
-          }
-        }
-      },
-    },
-    {
-      name: 'memory: keeps every message below the compaction trigger',
-      async run() {
-        for (const [n, s] of memorySamples().entries()) {
-          const ratio = ratioOf(s)
-          if (ratio >= trigger) continue
-          const view = await recall(s)
-          const shown = new Set([...view.history, ...view.transcript].map((x) => canonicalJson(x)))
-          const dropped = [...s.history, ...s.transcript]
-            .map((x) => canonicalJson(x))
-            .filter((x) => !shown.has(x))
-          assert.deepEqual(
-            dropped,
-            [],
-            `${m.id} 样本 ${n}：占比 ${ratio.toFixed(2)} 低于压缩触发线 ${trigger}，视图却丢了消息`,
+          const issue = memoryViewIssue(view)
+          assert.equal(issue, undefined, `${m.id} 样本 ${n}：${issue}`)
+          const total = s.history.length + s.transcript.length
+          assert.ok(
+            (view.compaction?.upTo ?? 0) <= total,
+            `${m.id} 样本 ${n}：压缩的 upTo ${view.compaction?.upTo} 超出了 ${total} 条消息`,
           )
         }
       },
     },
     {
-      // 设计 §4.4：记忆不得改写日志里的运行记录、不得动任务输入；压缩只改变视图（I3）。
+      name: 'memory: keeps tool calls paired with their results',
+      async run() {
+        for (const [n, s] of memorySamples().entries()) {
+          const view = renderView(s.history, s.transcript, (await recall(s)).compaction)
+          assertPaired([...view.history, ...view.transcript], `${m.id} 样本 ${n}`)
+        }
+      },
+    },
+    {
+      name: 'memory: compacts nothing below the compaction trigger',
+      async run() {
+        for (const [n, s] of memorySamples().entries()) {
+          const ratio = ratioOf(s)
+          if (ratio >= trigger) continue
+          const view = await recall(s)
+          assert.equal(
+            view.compaction,
+            undefined,
+            `${m.id} 样本 ${n}：占比 ${ratio.toFixed(2)} 低于压缩触发线 ${trigger}，却压缩了`,
+          )
+        }
+      },
+    },
+    {
+      // 设计 §4.4：记忆不得改写传入的消息、不得动任务输入；压缩只给出决定（I3）。
       name: 'memory: leaves the task input and the given messages untouched',
       async run() {
         for (const [n, s] of memorySamples().entries()) {
@@ -444,7 +438,7 @@ function memory(m: Memory, opts: ConformanceOptions = {}): ContractCase[] {
           assert.equal(
             canonicalJson([s.history, s.transcript]),
             given,
-            `${m.id} 样本 ${n}：改写了传入的 history 或运行记录（压缩只能改变视图）`,
+            `${m.id} 样本 ${n}：改写了传入的 history 或运行记录（压缩只能给出决定）`,
           )
         }
       },
@@ -453,7 +447,7 @@ function memory(m: Memory, opts: ConformanceOptions = {}): ContractCase[] {
       name: 'memory: handles an empty transcript',
       async run() {
         const view = await recall(memorySamples()[0]!)
-        assert.ok(Array.isArray(view.history) && Array.isArray(view.transcript))
+        assert.equal(memoryViewIssue(view), undefined)
       },
     },
   ]

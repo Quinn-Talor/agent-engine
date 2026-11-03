@@ -36,9 +36,12 @@ export interface TaskSnapshot {
   budget?: Budget
   /** 任务目标（≤ 200 字）；回归重放据此重算纠偏消息。 */
   goal?: string
-  /** 任务输入与 history 的 blob（`{ input, history }`）；回归重放据此重建交付验收的语料。 */
-  content?: BlobRef
+  /** 任务输入与 history 的 blob（`{ input, history }`，规范 JSON）；回归重放据此重建交付验收的语料。 */
+  content: BlobRef
 }
+
+/** 轮开始时压缩（A）、轮中压缩（B）、超限时引擎丢掉最早的整轮（C）。 */
+export type CompactionReason = 'turn_start' | 'in_run' | 'overflow_drop'
 
 export type PermissionVerdict = 'allow' | { deny: string } | { ask: AskRequest }
 
@@ -58,11 +61,15 @@ export type RunEvent = { seq: number; at: number } & (
       unavailable: Array<{ capability: string; reason: string }>
       model: ModelRef
       /** 运行模型的上下文窗口；超限检查与压力只读日志即可得到（F2 §B.4.4）。 */
-      contextLimit?: number
+      contextLimit: number
+      /** 给输出留出的 token：输入上限 = 窗口 − 输出预留（I7）。 */
+      outputReserve: number
       queuedMs: number
       parentRunId?: string
       rootRunId: string
       schemaVersion: number
+      /** 会话的一轮：序号、接续点与带入的窗口（窗口的消息在 `task.content`）。 */
+      session?: SessionStarted
     }
   | { t: 'step_started'; step: number }
   | {
@@ -78,7 +85,16 @@ export type RunEvent = { seq: number; at: number } & (
       messages: BlobRef[]
       tools: string[]
       estimate: number
-      compaction?: { replaced: [number, number]; summary: BlobRef; anchorsKept: number }
+      /**
+       * 当时生效的压缩：前文 + 运行记录连起来的前 `upTo` 条换成摘要。每一步都写；`reason`、`tokens`
+       * 只在压缩发生变化的那一步写。
+       */
+      compaction?: {
+        upTo: number
+        summary: BlobRef
+        reason?: CompactionReason
+        tokens?: { before: number; after: number }
+      }
     }
   | {
       t: 'model_responded'
@@ -153,7 +169,7 @@ export type RunEvent = { seq: number; at: number } & (
       }>
       verdict: Verdict
       /** 判定时刻（守卫跑完之后）：剩余时长按它计算，回归重放按它重算。 */
-      decidedAt?: number
+      decidedAt: number
     }
   | { t: 'step_ended'; step: number }
   | {
@@ -183,6 +199,42 @@ export type RunEvent = { seq: number; at: number } & (
     }
 )
 
+/** 副作用台账的一条（会话方案 §9）：跨轮不重做副作用（I15）。 */
+export interface LedgerEntry {
+  turn: number
+  tool: string
+  /** 调用参数的 JSON，最多 200 字。 */
+  input: string
+  status: 'executed' | 'possibly_executed'
+}
+
+/** 推导时读到某一轮日志的哪一条为止：之后追加的事件不改变已推导出的窗口（I17）。 */
+export interface TurnRef {
+  runId: string
+  seq: number
+}
+
+export interface SessionStarted {
+  id: string
+  turn: number
+  /** 接在哪一轮之后；会话的第一轮或从头开始时没有。 */
+  continues?: TurnRef
+  window: {
+    /** carry 的版本：同一版本下，同样的日志推导出同样的窗口。 */
+    version: number
+    /** 每一轮在窗口里的起点。 */
+    turnStarts: number[]
+    /** 窗口第一条是摘要时，它的正文。 */
+    summary?: BlobRef
+    ledger: LedgerEntry[]
+    /** 台账超过上限时省略的条数。 */
+    ledgerOmitted?: number
+    /** 台账取自哪一轮（序号最大的轮）。 */
+    ledgerFrom?: TurnRef
+    tokens: number
+  }
+}
+
 export interface RunOrigin {
   rootRunId: string
   parentRunId?: string
@@ -193,6 +245,7 @@ export interface RunOrigin {
   agentVersion?: string
   agentFingerprint: string
   subject?: string
+  session?: string
 }
 
 export type RunEventType = RunEvent['t']
@@ -206,6 +259,7 @@ export type RunEventBody = RunEvent extends infer E
 
 export interface RunFilter {
   subject?: string
+  session?: string
   environment?: string
   agentId?: string
   status?: RunStatus
@@ -240,7 +294,13 @@ export interface ArchiveStore {
   getBlob(ref: BlobRef): Promise<string | Uint8Array>
   query(filter: RunFilter): Promise<RunSummary[]>
   pin(runId: string, reason: string): Promise<void>
+  /** 按保留期清理；会话按整体过期（会话方案 §13）。 */
   retain(policy: RetentionPolicy): Promise<RetainReport>
+  /**
+   * 删除整个会话：它的全部运行与子运行，以及不再被其他运行引用的 blob（会话结束之后没有被再次写入过的
+   * 不受宽限期保护）。会话里有没结束的运行时拒绝。
+   */
+  deleteSession(session: string): Promise<RetainReport>
 }
 
 /** `EngineConfig.services.archive` 使用的运行档案。 */

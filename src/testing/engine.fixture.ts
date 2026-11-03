@@ -18,7 +18,7 @@ export const testDefaults = (): EngineDefaults => ({
   memory: {
     id: 'pass',
     version: '1',
-    start: () => ({ recall: async (s) => ({ history: s.history, transcript: s.transcript }) }),
+    start: () => ({ recall: async () => ({}) }),
   },
   guards: [],
   deliverable: {

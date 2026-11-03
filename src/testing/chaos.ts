@@ -138,6 +138,7 @@ export function chaos(
       getBlob: (ref) => a.getBlob(ref),
       query: (filter) => a.query(filter),
       pin: (runId, reason) => a.pin(runId, reason),
+      deleteSession: (session) => a.deleteSession(session),
       retain: (policy) => a.retain(policy),
     }),
     mcpConnect: (c) => async (server, connectOpts) =>

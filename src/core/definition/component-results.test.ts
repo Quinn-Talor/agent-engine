@@ -64,35 +64,22 @@ describe('checkResultIssue', () => {
 })
 
 describe('memoryViewIssue', () => {
-  const user = { role: 'user', content: 'hi' }
   it.each([
-    [{ history: [], transcript: [] }],
-    [{ history: [user], transcript: [{ role: 'assistant', content: [] }] }],
-    [
-      {
-        history: [],
-        transcript: [user],
-        compaction: { replaced: [0, 2], summary: '摘要', anchorsKept: 1 },
-      },
-    ],
+    [{}],
+    [{ compaction: { upTo: 2, summary: '摘要' } }],
+    [{ notice: '压缩暂时不可用' }],
+    [{ compaction: { upTo: 1, summary: 's' }, notice: 'n' }],
   ])('accepts %j', (view) => {
     expect(memoryViewIssue(view)).toBeUndefined()
   })
 
   it.each([
     [null, '对象'],
-    [{}, 'history'],
-    [{ history: [], transcript: 'x' }, 'transcript'],
-    [{ history: [{ content: 'hi' }], transcript: [] }, 'role'],
-    [{ history: [{ role: 'robot', content: 'hi' }], transcript: [] }, 'role'],
-    [
-      { history: [], transcript: [], compaction: { replaced: [0], summary: 's', anchorsKept: 1 } },
-      'compaction',
-    ],
-    [
-      { history: [], transcript: [], compaction: { replaced: [0, 1], summary: 1, anchorsKept: 1 } },
-      'compaction',
-    ],
+    [{ compaction: { upTo: 0, summary: 's' } }, 'upTo'],
+    [{ compaction: { upTo: 1.5, summary: 's' } }, 'upTo'],
+    [{ compaction: { upTo: 2, summary: '' } }, 'summary'],
+    [{ compaction: { replaced: [0, 2], summary: 's', anchorsKept: 1 } }, 'upTo'],
+    [{ notice: 1 }, 'notice'],
   ])('rejects %j', (view, hint) => {
     expect(memoryViewIssue(view)).toContain(hint)
   })

@@ -306,6 +306,7 @@ describe('budgetState', () => {
       runStarted({
         task: {
           fingerprint: 't',
+          content: 'sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',
           budget: { maxSteps: 5, maxTotalMs: 10_000, maxInputTokens: 100, maxCost: 1 },
         },
       }),
@@ -329,7 +330,11 @@ describe('budgetState', () => {
   it('counts cached input toward maxInputTokens and the queue toward the time left', () => {
     const state = sequence([
       runStarted({
-        task: { fingerprint: 't', budget: { maxTotalMs: 10_000, maxInputTokens: 100 } },
+        task: {
+          fingerprint: 't',
+          content: 'sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',
+          budget: { maxTotalMs: 10_000, maxInputTokens: 100 },
+        },
         queuedMs: 3_000,
       }),
       stepStarted(1),

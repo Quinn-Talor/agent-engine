@@ -327,11 +327,11 @@ export function createDelivery(deps: DeliverDeps): Delivery {
       toolChoice: 'none',
     })
     const usable = (text: string | undefined): text is string => !!text && text.trim().length > 0
-    // I7：估算达到上下文上限的级别不调用模型，直接退到下一级（与组装的超限检查同一口径）。
+    // I7：估算达到输入上限的级别不调用模型，直接退到下一级（与组装的超限检查同一口径）。
     const fits = (input: ModelInput) =>
       Math.ceil(
         (estimateMessages(input.messages) + estimateTools(input.tools)) * state.calibration,
-      ) < state.contextLimit
+      ) < state.inputLimit
     const sanitize = (text: string, corpus: Corpus): string | undefined => {
       if (!output.sanitize) return text
       try {

@@ -25,7 +25,7 @@ export const fixedFallback = (): Fallback => ({
 export const passMemory = (): Memory => ({
   id: 'pass',
   version: '1',
-  start: () => ({ recall: async (s) => ({ history: s.history, transcript: s.transcript }) }),
+  start: () => ({ recall: async () => ({}) }),
 })
 
 export const allExposure = (): Exposure => ({

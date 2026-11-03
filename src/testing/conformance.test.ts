@@ -40,16 +40,16 @@ const streak: Guard = {
 const passMemory: Memory = {
   id: 'pass',
   version: '1',
-  start: () => ({ recall: async (s) => ({ history: s.history, transcript: s.transcript }) }),
+  start: () => ({ recall: async () => ({}) }),
 }
 const ratioOf = (s: MemoryState) =>
-  (s.fixedTokens + s.estimate([...s.history, ...s.transcript])) / s.contextLimit
+  s.estimate([...s.history, ...s.transcript]) / (s.inputLimit - s.fixedTokens)
 const isCall = (m: ModelMessage) =>
   m.role === 'assistant' &&
   Array.isArray(m.content) &&
   m.content.some((p) => p.type === 'tool-call')
 
-/** 达到窗口 × trigger 时，把最后一组工具交换之前的内容压成摘要；`cutAt` 改写切分点。 */
+/** 占比达到 trigger 时，把最后一组工具交换之前的内容压成摘要；`cutAt` 改写切分点。 */
 function summarizingMemory(
   opts: { trigger?: number; cutAt?: (cut: number) => number; onCompact?: () => void } = {},
 ): Memory {
@@ -59,21 +59,16 @@ function summarizingMemory(
     start: (_run, ctx) => ({
       async recall(s): Promise<MemoryView> {
         const all = [...s.history, ...s.transcript]
-        if (ratioOf(s) < (opts.trigger ?? 0.8))
-          return { history: s.history, transcript: s.transcript }
+        if (ratioOf(s) < (opts.trigger ?? 0.8)) return {}
         const last = all.findLastIndex(isCall)
         const cut = opts.cutAt ? opts.cutAt(last) : last
         const response = await ctx.callModel({
           purpose: 'memory:compaction',
           messages: [{ role: 'user', content: JSON.stringify(all.slice(0, cut)) }],
         })
-        if (cut <= 0 || !response) return { history: s.history, transcript: s.transcript }
+        if (cut <= 0 || !response) return {}
         opts.onCompact?.()
-        return {
-          history: [{ role: 'system', content: `【前文摘要】\n${response.text}` }],
-          transcript: all.slice(cut),
-          compaction: { replaced: [0, cut], summary: response.text, anchorsKept: 1 },
-        }
+        return { compaction: { upTo: cut, summary: response.text } }
       },
     }),
   }
@@ -158,9 +153,9 @@ describe('conformance', () => {
     const cases = conformance.memory(passMemory)
     expect(cases.map((c) => c.name)).toEqual([
       'memory: is deterministic',
+      'memory: returns a valid decision',
       'memory: keeps tool calls paired with their results',
-      'memory: only shows messages from the history and the transcript',
-      'memory: keeps every message below the compaction trigger',
+      'memory: compacts nothing below the compaction trigger',
       'memory: leaves the task input and the given messages untouched',
       'memory: handles an empty transcript',
     ])
@@ -175,7 +170,7 @@ describe('conformance', () => {
       start: () => ({
         recall: async (s) => {
           ratios.push(ratioOf(s))
-          return { history: s.history, transcript: s.transcript }
+          return {}
         },
       }),
     }
@@ -187,12 +182,12 @@ describe('conformance', () => {
     expect(compactions).toBeGreaterThan(0)
   })
 
-  it('AC-010 checks drops against the trigger the memory declares', async () => {
+  it('AC-010 checks compactions against the trigger the memory declares', async () => {
     const early = summarizingMemory({ trigger: 0.5 })
     await expect(
       named(
         conformance.memory(early),
-        'memory: keeps every message below the compaction trigger',
+        'memory: compacts nothing below the compaction trigger',
       ).run(),
     ).rejects.toThrow(/低于压缩触发线/)
     await passAll(conformance.memory(early, { trigger: 0.5 }))
@@ -273,72 +268,7 @@ describe('conformance', () => {
     ).rejects.toThrow()
   })
 
-  it('AC-014 fails memories that break pairs or invent messages', async () => {
-    const dropResults: Memory = {
-      ...passMemory,
-      start: () => ({
-        recall: async (s) => ({
-          history: s.history,
-          transcript: s.transcript.filter((m) => m.role !== 'tool'),
-        }),
-      }),
-    }
-    await expect(
-      named(
-        conformance.memory(dropResults),
-        'memory: keeps tool calls paired with their results',
-      ).run(),
-    ).rejects.toThrow()
-    const inventing: Memory = {
-      ...passMemory,
-      start: () => ({
-        recall: async (s) => ({
-          history: [...s.history, { role: 'user', content: '编造的消息' }],
-          transcript: s.transcript,
-        }),
-      }),
-    }
-    await expect(
-      named(
-        conformance.memory(inventing),
-        'memory: only shows messages from the history and the transcript',
-      ).run(),
-    ).rejects.toThrow(/编造的消息/)
-    const orphan: Memory = {
-      ...passMemory,
-      start: () => ({
-        recall: async (s) => ({
-          history: s.history,
-          transcript: s.transcript.filter((m) => m.role !== 'assistant'),
-        }),
-      }),
-    }
-    await expect(
-      named(conformance.memory(orphan), 'memory: keeps tool calls paired with their results').run(),
-    ).rejects.toThrow()
-  })
-
-  it('AC-014 fails memories that break pairs or drop messages once the view grows', async () => {
-    // 估算值过半就丢掉第一组工具交换的结果。
-    const halfDrop: Memory = {
-      ...passMemory,
-      start: () => ({
-        recall: async (s) =>
-          ratioOf(s) < 0.5
-            ? { history: s.history, transcript: s.transcript }
-            : {
-                history: s.history,
-                transcript: s.transcript.filter((m, i) => !(m.role === 'tool' && i === 1)),
-              },
-      }),
-    }
-    const cases = conformance.memory(halfDrop)
-    await expect(
-      named(cases, 'memory: keeps tool calls paired with their results').run(),
-    ).rejects.toThrow('后面没有紧跟结果')
-    await expect(
-      named(cases, 'memory: keeps every message below the compaction trigger').run(),
-    ).rejects.toThrow(/低于压缩触发线/)
+  it('AC-014 fails memories whose compaction splits a pair or runs past the messages', async () => {
     // 压缩时切分点落在工具结果上：结果留在视图里，调用被压进了摘要。
     const splitting = summarizingMemory({ cutAt: (cut) => cut + 1 })
     await expect(
@@ -347,27 +277,34 @@ describe('conformance', () => {
         'memory: keeps tool calls paired with their results',
       ).run(),
     ).rejects.toThrow('前面没有调用')
-  })
-
-  it('AC-014 fails a memory that inserts undeclared system messages', async () => {
-    const tip = (compaction?: MemoryView['compaction']): Memory => ({
+    const pastTheEnd: Memory = {
       ...passMemory,
       start: () => ({
         recall: async (s) => ({
-          history: s.history,
-          transcript: [...s.transcript, { role: 'system', content: '[memory] 请精简输出' }],
-          ...(compaction ? { compaction } : {}),
+          compaction: { upTo: s.history.length + s.transcript.length + 1, summary: 's' },
         }),
       }),
-    })
-    const name = 'memory: only shows messages from the history and the transcript'
-    await expect(named(conformance.memory(tip()), name).run()).rejects.toThrow(/请精简输出/)
-    const unrelated = { replaced: [0, 0] as [number, number], summary: '别的摘要', anchorsKept: 0 }
-    await expect(named(conformance.memory(tip(unrelated)), name).run()).rejects.toThrow(
-      /请精简输出/,
-    )
-    const empty = { ...unrelated, summary: '' }
-    await expect(named(conformance.memory(tip(empty)), name).run()).rejects.toThrow(/请精简输出/)
+    }
+    await expect(
+      named(conformance.memory(pastTheEnd), 'memory: returns a valid decision').run(),
+    ).rejects.toThrow(/超出了/)
+    const empty: Memory = {
+      ...passMemory,
+      start: () => ({ recall: async () => ({ compaction: { upTo: 1, summary: '' } }) }),
+    }
+    await expect(
+      named(conformance.memory(empty), 'memory: returns a valid decision').run(),
+    ).rejects.toThrow(/summary/)
+  })
+
+  it('AC-014 fails a memory that compacts below its trigger', async () => {
+    const eager = summarizingMemory({ trigger: 0 })
+    await expect(
+      named(
+        conformance.memory(eager),
+        'memory: compacts nothing below the compaction trigger',
+      ).run(),
+    ).rejects.toThrow(/低于压缩触发线/)
   })
 
   it('AC-014 fails a memory that rewrites the task input or the messages it was given', async () => {
@@ -375,9 +312,9 @@ describe('conformance', () => {
     const rewritesInput: Memory = {
       ...passMemory,
       start: (run) => ({
-        recall: async (s) => {
+        recall: async () => {
           run.task.input = '改写的任务输入'
-          return { history: s.history, transcript: s.transcript }
+          return {}
         },
       }),
     }
@@ -387,7 +324,7 @@ describe('conformance', () => {
       start: () => ({
         recall: async (s) => {
           s.transcript.splice(0, 2)
-          return { history: [...s.history], transcript: [...s.transcript] }
+          return {}
         },
       }),
     }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { ModelMessage, Segment } from '../../contracts/common.js'
-import { layout, segmentToMessage, type ViewParts } from './layout.js'
+import { layout, renderView, segmentToMessage, summaryMessage, type ViewParts } from './layout.js'
 
 const sys = (text: string): Segment => ({ role: 'system', parts: [{ type: 'text', text }] })
 const user = (text: string): Segment => ({ role: 'user', parts: [{ type: 'text', text }] })
@@ -88,5 +88,33 @@ describe('segmentToMessage', () => {
       ],
     }
     expect(segmentToMessage(segment)).toEqual({ role: 'user', content: segment.parts })
+  })
+})
+
+describe('renderView', () => {
+  const history = [msg('h0'), msg('h1'), msg('h2')]
+  const transcript = [msg('t0'), msg('t1')]
+
+  it('§3.13 leaves history and transcript as they are without a compaction', () => {
+    expect(renderView(history, transcript)).toEqual({ history, transcript })
+  })
+
+  it('§3.13 replaces the first upTo messages of history + transcript with one summary', () => {
+    expect(renderView(history, transcript, { upTo: 2, summary: 's' })).toEqual({
+      history: [summaryMessage('s'), msg('h2')],
+      transcript,
+    })
+    // 覆盖到运行记录时，前文只剩摘要（布局里任务输入仍在摘要和剩下的运行记录之间）。
+    expect(renderView(history, transcript, { upTo: 4, summary: 's' })).toEqual({
+      history: [summaryMessage('s')],
+      transcript: [msg('t1')],
+    })
+  })
+
+  it('renders the summary as one system message with a fixed heading', () => {
+    expect(summaryMessage('意图：查天气')).toEqual({
+      role: 'system',
+      content: '【前文摘要】\n意图：查天气',
+    })
   })
 })

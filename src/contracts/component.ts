@@ -51,8 +51,10 @@ export interface ComponentCtx {
   log(level: LogLevel, message: string, detail?: unknown): void
   /** 取得能力宿主，例如 hook 执行器；宿主不存在时抛错（方案 D12）。 */
   host<T>(kind: string): T
-  /** 所属运行的取消信号：取消随时生效（设计 §3.1），交给 hook 等外部执行（F19 新增，可选）。 */
-  signal?: AbortSignal
+  /** 所属运行的取消信号：取消随时生效（设计 §3.1），交给 hook 等外部执行。 */
+  signal: AbortSignal
+  /** 模型的窗口与输出上限；不写 ref 时为运行的模型，不认识的模型返回 undefined。 */
+  modelLimits(ref?: ModelRef): { contextLimit: number; maxOutputTokens: number } | undefined
 }
 
 // ── 工具呈现（§9.2） ────────────────────────────────────────────
@@ -82,16 +84,26 @@ export interface MemoryState {
   history: ModelMessage[]
   transcript: ModelMessage[]
   contextLimit: number
+  /** 输入上限：模型窗口减去输出预留；估算达到它就不调用模型（I7），压缩的各条线按它算。 */
+  inputLimit: number
   /** 须知、指令、能力说明、任务输入、尾部占用的 token。 */
   fixedTokens: number
   estimate(messages: ModelMessage[]): number
+  /** 会话的一轮：history 第一条是带入的摘要时，它的正文；接着合并，不要当成普通消息再总结一遍。 */
+  summary?: string
+  /** history 里每一轮的起点下标（升序），切以前各轮时按轮切；不带会话的运行为空。 */
+  turnStarts: number[]
 }
 
+/**
+ * 记忆的决定（设计 §9.3）：视图由引擎按它渲染（`renderView`），记忆不直接给出消息。
+ * `compaction`：把 history + 运行记录连起来的前 `upTo` 条换成摘要；切点必须落在成对边界上。
+ * 每一步都给出当时生效的压缩，不写表示不压缩。
+ */
 export interface MemoryView {
-  history: ModelMessage[]
-  /** 切分点必须落在成对边界上。 */
-  transcript: ModelMessage[]
-  compaction?: { replaced: [number, number]; summary: string; anchorsKept: number }
+  compaction?: { upTo: number; summary: string }
+  /** 本步附在尾部的提示，例如压缩暂时不可用；不进运行记录。 */
+  notice?: string
 }
 
 export interface Memory extends Component {

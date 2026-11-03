@@ -68,6 +68,8 @@ export const guardCtx = (patch: Partial<ComponentCtx> = {}): ComponentCtx => ({
   host: (kind) => {
     throw new Error(`没有能力宿主 ${kind}`)
   },
+  signal: new AbortController().signal,
+  modelLimits: () => ({ contextLimit: 1000, maxOutputTokens: 500 }),
   ...patch,
 })
 

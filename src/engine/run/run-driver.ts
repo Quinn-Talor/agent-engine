@@ -17,7 +17,12 @@ import type {
   ToolboxState,
 } from '../../contracts/component.js'
 import type { Vault } from '../../contracts/engine.js'
-import type { Caps, Environment, EnvironmentConfig } from '../../contracts/environment.js'
+import type {
+  Assignment,
+  Caps,
+  Environment,
+  EnvironmentConfig,
+} from '../../contracts/environment.js'
 import { isModelCallError, toolError } from '../../contracts/errors.js'
 import {
   SCHEMA_VERSION,
@@ -31,6 +36,8 @@ import type { ModelHub, ModelInput, ModelRef, NormalizedUsage } from '../../cont
 import type { Run, RunResult } from '../../contracts/run.js'
 import type { Task } from '../../contracts/task.js'
 import { canonicalJson } from '../../core/definition/hash.js'
+import { estimateMessages, outputReserveOf } from '../../core/run/estimate.js'
+import { CARRY_VERSION, ledgerSegment } from '../../core/session/window.js'
 import { layout } from '../../core/run/layout.js'
 import { buildCorpus, sideEffects } from '../../core/log/projections.js'
 import { apply, initial, nextStage, type RunState } from '../../core/run/state.js'
@@ -52,6 +59,7 @@ import { rootLineage, type Lineage } from './lineage.js'
 import { prepareRun, type PreparedRun } from './prepare.js'
 import { createRunAbort, type AbortReason } from './run-abort.js'
 import { createRunContext, placeExternalCalls, secretKeeper } from './run-context.js'
+import { deriveSession, occupySession, type SessionClaim } from './session.js'
 import { buildResult, checkResult, type Failure } from './run-result.js'
 import { createSubscribers } from './subscribers.js'
 
@@ -76,6 +84,10 @@ export interface EngineRuntime {
   defaults: { deliverable: Deliverable & { fallback: Fallback }; exposure: Exposure }
   fingerprint: string
   environmentOf(e: Environment): EnvironmentRuntime | undefined
+  /** 会话 → 正在占用它的运行（同一会话一次一轮）。 */
+  sessions: Map<string, string>
+  /** 启动时的中断补齐。 */
+  recovered: Promise<unknown>
 }
 
 export interface EnvironmentRuntime {
@@ -102,7 +114,7 @@ export interface ParentLink {
 export interface RunRequest {
   agent: Agent
   task: Task
-  assignment?: { model?: ModelRef; runId?: string }
+  assignment?: Assignment
   parent?: ParentLink
   /** 不执行，直接以 failed 结束（例如引擎已关闭）。 */
   refuse?: { code: string; message: string }
@@ -122,6 +134,12 @@ const textOf = (task: Task) =>
     .join('\n')
 
 const MAX_GOAL_CHARS = 200
+
+/** 副作用台账放在尾部（会话方案 §9）；台账为空时没有。 */
+const withLedger = (claim: SessionClaim) => {
+  const ledger = ledgerSegment(claim.derived.ledger, claim.derived.omitted)
+  return ledger ? { ledger } : {}
+}
 
 /** 已准备好的环节模块；准备完成后才有。 */
 interface Stages {
@@ -156,6 +174,17 @@ export function startRun(
 
   const events: RunEvent[] = []
   const inbox: string[] = []
+  const sessionId = parent ? undefined : req.assignment?.session
+  /** 主题缺省取会话 id：按主题查运行时一个会话就是一个主题。 */
+  const subject = task.subject ?? sessionId
+  let claim: SessionClaim | undefined
+  // 同步占住会话（会话方案 §12）：忙碌时这一轮在 startRun 返回之前就确定被拒，steer 不再收下引导。
+  const occupied =
+    sessionId !== undefined && !req.refuse && (task.history?.length ?? 0) === 0
+      ? occupySession(engine.sessions, sessionId, runId)
+      : undefined
+  const busy =
+    sessionId !== undefined && !req.refuse && (task.history?.length ?? 0) === 0 && !occupied
   let state: RunState = initial({ runId })
   let writes: Promise<unknown> = Promise.resolve()
   let ending = false
@@ -256,9 +285,39 @@ export function startRun(
       failure = req.refuse
       return
     }
+    if (sessionId === undefined && !parent && req.assignment?.continues !== undefined) {
+      failure = { code: 'invalid_task', message: '给了接续点 continues 却没有给会话 session' }
+      return
+    }
+    // 会话的一轮（会话方案 §5）：前文只有一个来源；占住会话后推导带入的窗口与台账。子运行不是轮。
+    if (sessionId !== undefined && !parent) {
+      if ((task.history?.length ?? 0) > 0) {
+        failure = {
+          code: 'invalid_task',
+          message: '会话的一轮不能再给 history：前文由引擎从会话日志推导',
+        }
+        return
+      }
+      if (!occupied) {
+        failure = { code: 'session_busy', message: `会话 ${sessionId} 有一轮正在运行` }
+        return
+      }
+      releases.push(occupied)
+      const claimed = await deriveSession(engine, occupied, {
+        session: sessionId,
+        ...(req.assignment?.continues !== undefined ? { continues: req.assignment.continues } : {}),
+      })
+      if (!claimed.ok) {
+        failure = { code: claimed.code, message: claimed.message }
+        return
+      }
+      claim = claimed.claim
+    }
+    const history: ModelMessage[] = claim ? claim.derived.window.messages : (task.history ?? [])
     const admission = admit({
       agent,
       task,
+      history,
       ...(req.assignment ? { assignment: req.assignment } : {}),
       caps,
       hub: engine.hub,
@@ -301,7 +360,7 @@ export function startRun(
       environment: { name: env.config.name, principalReachable: env.config.principal.reachable },
       agent: { id: agent.id, ...(agent.version !== undefined ? { version: agent.version } : {}) },
       task: {
-        ...(task.subject !== undefined ? { subject: task.subject } : {}),
+        ...(subject !== undefined ? { subject } : {}),
         ...(task.tags !== undefined ? { tags: task.tags } : {}),
         ...(task.scope !== undefined ? { scope: task.scope } : {}),
         ...(task.context !== undefined ? { context: task.context } : {}),
@@ -339,7 +398,7 @@ export function startRun(
         clock,
         signal,
         notice: env.config.notice ?? [],
-        history: task.history ?? [],
+        history,
         ctxFor,
         putBlob,
         log,
@@ -363,13 +422,13 @@ export function startRun(
         },
         task: {
           fingerprint: task.fingerprint,
-          ...(task.subject !== undefined ? { subject: task.subject } : {}),
+          ...(subject !== undefined ? { subject } : {}),
           ...(task.tags !== undefined ? { tags: task.tags } : {}),
           ...(task.scope !== undefined ? { scope: task.scope } : {}),
           ...(task.context !== undefined ? { context: task.context } : {}),
           budget: a.budget,
           ...(goal ? { goal } : {}),
-          content: await putBlob(canonicalJson({ input: task.input, history: task.history ?? [] })),
+          content: await putBlob(canonicalJson({ input: task.input, history })),
         },
         environment: {
           name: env.config.name,
@@ -381,10 +440,12 @@ export function startRun(
         unavailable: p.unavailable,
         model: a.model,
         contextLimit: a.port.capabilities.contextLimit,
+        outputReserve: outputReserveOf(a.port.capabilities),
         queuedMs,
         ...(parent ? { parentRunId: parent.runId } : {}),
         rootRunId: lineage.rootRunId,
         schemaVersion: SCHEMA_VERSION,
+        ...(claim ? { session: await sessionStarted(claim) } : {}),
       }
       await commit(placeExternalCalls([started], [...p.noticeEvents, ...drain()]))
       // 硬截止与时间压力同一起点：run_started 减去排队时长（设计 §5.3），准备的耗时也算在内。
@@ -394,6 +455,25 @@ export function startRun(
       }
       stages = buildStages(p, runInfo, ctxFor)
       return true
+    }
+
+    /** 冻结本轮带入的窗口（会话方案 §13）：消息在 task.content，这里是元数据。 */
+    const sessionStarted = async (c: SessionClaim) => {
+      const d = c.derived
+      return {
+        id: c.id,
+        turn: d.turn,
+        ...(d.continues ? { continues: d.continues } : {}),
+        window: {
+          version: CARRY_VERSION,
+          turnStarts: d.window.turnStarts,
+          ...(d.window.summary !== undefined ? { summary: await putBlob(d.window.summary) } : {}),
+          ledger: d.ledger,
+          ...(d.omitted > 0 ? { ledgerOmitted: d.omitted } : {}),
+          ...(d.ledgerFrom ? { ledgerFrom: d.ledgerFrom } : {}),
+          tokens: estimateMessages(d.window.messages),
+        },
+      }
     }
 
     const buildStages = (
@@ -408,7 +488,6 @@ export function startRun(
       } catch (error) {
         log('warn', '工具呈现启动出错，退回全部可见', { error: messageOf(error) })
       }
-      const history: ModelMessage[] = task.history ?? []
       const minimalView = () =>
         layout({
           notice: p.notice,
@@ -419,6 +498,7 @@ export function startRun(
           transcript: [],
           tail: [],
           tools: [],
+          maxOutputTokens: outputReserveOf(a.port.capabilities),
         })
       const corpus = async (): Promise<Corpus> => {
         const effects = new Map(
@@ -454,6 +534,18 @@ export function startRun(
         getBlob,
         putBlob,
         log,
+        outputReserve: outputReserveOf(a.port.capabilities),
+        ...(claim
+          ? {
+              session: {
+                turnStarts: claim.derived.window.turnStarts,
+                ...(claim.derived.window.summary !== undefined
+                  ? { summary: claim.derived.window.summary }
+                  : {}),
+                ...withLedger(claim),
+              },
+            }
+          : {}),
       })
       return {
         prepared: p,
@@ -634,7 +726,7 @@ export function startRun(
         runId,
         scope: task.scope ?? {},
         task: {
-          ...(task.subject !== undefined ? { subject: task.subject } : {}),
+          ...(subject !== undefined ? { subject } : {}),
           ...(task.context !== undefined ? { context: task.context } : {}),
         },
         spawn,
@@ -719,59 +811,68 @@ export function startRun(
 
   const finish = async () => {
     try {
-      // 写入期间又到的引导也写进去：收件箱清空才标记结束，之后的引导按已结束忽略。
-      while (inbox.length > 0) await flushInbox()
+      // 写入期间又到的引导也写进去：收件箱清空才标记结束，之后的引导按已结束忽略。没开始的运行
+      // 只有 run_ended（设计 §3.12），排队的引导丢弃。
+      if (events.some((e) => e.t === 'run_started')) {
+        while (inbox.length > 0) await flushInbox()
+      } else inbox.length = 0
     } catch (error) {
       log('error', '写入引导失败', { error: messageOf(error) })
     }
     ending = true
-    // 还在进行的子运行：等它交付，超时后取消（设计 §3.14）。
-    await children.settle()
-    await recordMissingResults()
-    const built = buildResult({
-      runId,
-      state,
-      events,
-      abortReason: abort.reason(),
-      outcomeBeforeAbort: abort.outcomeBeforeAbort(),
-      failure,
-      delivered: subscribers.delivered(),
-      admitted,
-      attemptedModel,
-    })
-    const { result: runResult, violations } = checkResult(built, events, {
-      seq: state.lastSeq + 1,
-      at: clock.now(),
-    })
-    if (violations.length > 0) log('error', '不变量自检失败', { violations })
-    // 没开始就结束的运行：带上归属，档案才能按状态、主题查到它，并按保留期清理。
-    const origin: RunOrigin | undefined = events.some((e) => e.t === 'run_started')
-      ? undefined
-      : {
-          rootRunId: lineage.rootRunId,
-          ...(parent ? { parentRunId: parent.runId } : {}),
-          environment: env.config.name,
-          environmentFingerprint: env.fingerprint,
-          engineFingerprint: engine.fingerprint,
-          agentId: agent.id,
-          ...(agent.version !== undefined ? { agentVersion: agent.version } : {}),
-          agentFingerprint: agent.fingerprint,
-          ...(task.subject !== undefined ? { subject: task.subject } : {}),
-        }
+    let runResult: RunResult
     try {
-      await commit([{ t: 'run_ended', result: runResult, ...(origin ? { origin } : {}) }])
-    } catch (error) {
-      log('error', '写入 run_ended 失败', { error: messageOf(error) })
-    }
-    for (const release of releases) {
-      try {
-        release()
-      } catch (error) {
-        log('warn', '释放能力出错', { error: messageOf(error) })
+      // 还在进行的子运行：等它交付，超时后取消（设计 §3.14）。
+      await children.settle()
+      await recordMissingResults()
+      const built = buildResult({
+        runId,
+        state,
+        events,
+        abortReason: abort.reason(),
+        outcomeBeforeAbort: abort.outcomeBeforeAbort(),
+        failure,
+        delivered: subscribers.delivered(),
+        admitted,
+        attemptedModel,
+      })
+      const checked = checkResult(built, events, { seq: state.lastSeq + 1, at: clock.now() })
+      runResult = checked.result
+      if (checked.violations.length > 0) {
+        log('error', '不变量自检失败', { violations: checked.violations })
       }
+      // 没开始就结束的运行：带上归属，档案才能按状态、主题查到它，并按保留期清理。
+      const origin: RunOrigin | undefined = events.some((e) => e.t === 'run_started')
+        ? undefined
+        : {
+            rootRunId: lineage.rootRunId,
+            ...(parent ? { parentRunId: parent.runId } : {}),
+            environment: env.config.name,
+            environmentFingerprint: env.fingerprint,
+            engineFingerprint: engine.fingerprint,
+            agentId: agent.id,
+            ...(agent.version !== undefined ? { agentVersion: agent.version } : {}),
+            agentFingerprint: agent.fingerprint,
+            ...(subject !== undefined ? { subject } : {}),
+            ...(sessionId !== undefined ? { session: sessionId } : {}),
+          }
+      try {
+        await commit([{ t: 'run_ended', result: runResult, ...(origin ? { origin } : {}) }])
+      } catch (error) {
+        log('error', '写入 run_ended 失败', { error: messageOf(error) })
+      }
+    } finally {
+      // 无论上面哪一步出错，会话的占用、能力占用的资源和准入名额都要还（会话方案 §12）。
+      for (const release of releases) {
+        try {
+          release()
+        } catch (error) {
+          log('warn', '释放能力出错', { error: messageOf(error) })
+        }
+      }
+      slot?.release()
+      abort.dispose()
     }
-    slot?.release()
-    abort.dispose()
     await subscribers.drain(SUBSCRIBER_DRAIN_MS)
     resolveResult(runResult)
   }
@@ -788,7 +889,10 @@ export function startRun(
     result,
     subscribe: subscribers.subscribe,
     steer(text) {
-      if (!ending) inbox.push(text)
+      // 已经结束、被忙碌的会话拒绝、或在受理时失败的运行都不收引导。
+      if (ending || busy || failure !== undefined) return false
+      inbox.push(text)
+      return true
     },
     abort(reason) {
       if (reason !== undefined && !ending) log('info', `运行被中止：${reason}`)

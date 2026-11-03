@@ -85,7 +85,12 @@ describe('createRunContext', () => {
       messages: [{ role: 'user', content: 'long story' }],
       maxOutputTokens: 500,
     })
-    expect(response).toEqual({ text: 'summary', usage: usage(7, 3), model: 'fake:main' })
+    expect(response).toEqual({
+      text: 'summary',
+      usage: usage(7, 3),
+      model: 'fake:main',
+      finishReason: 'stop',
+    })
     expect(main.inputs[0]).toEqual({
       messages: [
         { role: 'system', content: 'compress' },
@@ -131,6 +136,17 @@ describe('createRunContext', () => {
     await expect(ctx.callModel({ purpose: 'x', messages: [], model: 'fake:nope' })).rejects.toThrow(
       '模型 fake:nope 不存在',
     )
+  })
+
+  it('tells components the window and output limit of a model', () => {
+    const { context } = setup()
+    const ctx = context.ctxFor('memory:compacting')
+    expect(ctx.modelLimits?.()).toEqual({ contextLimit: 128_000, maxOutputTokens: 8192 })
+    expect(ctx.modelLimits?.('fake:small')).toEqual({
+      contextLimit: 128_000,
+      maxOutputTokens: 8192,
+    })
+    expect(ctx.modelLimits?.('fake:nope')).toBeUndefined()
   })
 
   it('calls the model for guards without a supervision share (the advisor limits itself)', async () => {

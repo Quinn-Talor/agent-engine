@@ -32,6 +32,7 @@ const summarizing = {
       text: '1. 意图：整理天气\n2. 关键事实：东京晴',
       usage: { input: 10, output: 5, cacheRead: 0, cacheWrite: 0 },
       model: 'fake:model',
+      finishReason: 'stop' as const,
     }),
   } satisfies Partial<ComponentCtx>,
 }

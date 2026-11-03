@@ -312,6 +312,17 @@ describe('checkInvariants complete (F19)', () => {
     expect(full(bodies)[0]).toBe('I7')
   })
 
+  it('AC-013 counts the output reserve for I7: the limit is the window minus the reserve', () => {
+    const bodies = completeRun().map((b) =>
+      b.t === 'run_started'
+        ? { ...b, outputReserve: 2000 }
+        : b.t === 'context_built' && b.step === 2
+          ? contextBuilt(2, 8500)
+          : b,
+    )
+    expect(full(bodies)[0]).toBe('I7')
+  })
+
   it('AC-013 reports a model_error without a classified code as I9', () => {
     const unclassified = failedRun({
       status: 'failed',

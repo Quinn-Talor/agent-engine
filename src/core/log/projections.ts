@@ -5,6 +5,7 @@ import type { Corpus, Observation } from '../../contracts/component.js'
 import type { BlobRef, RunEvent, RunOrigin } from '../../contracts/events.js'
 import type { QualityReport, RunSummary } from '../../contracts/run.js'
 import type { ToolEffect } from '../../contracts/tool.js'
+import { parseCanonical } from '../definition/hash.js'
 import { possiblyExecuted } from '../supervision/error-class.js'
 import { segmentToMessage } from '../run/layout.js'
 import { apply, initial, type RunState, type TranscriptEntry } from '../run/state.js'
@@ -35,6 +36,7 @@ function unstartedSummary(ended: Of<'run_ended'>, origin: RunOrigin): RunSummary
   if (origin.parentRunId !== undefined) summary.parentRunId = origin.parentRunId
   if (origin.agentVersion !== undefined) summary.agentVersion = origin.agentVersion
   if (origin.subject !== undefined) summary.subject = origin.subject
+  if (origin.session !== undefined) summary.session = origin.session
   if (ended.result.code !== undefined) summary.code = ended.result.code
   return summary
 }
@@ -46,7 +48,7 @@ export function foldState(events: readonly RunEvent[]): RunState {
 
 /**
  * 运行摘要；runId 由档案以自己的键覆盖。没有 run_started 的运行（受理失败等）按 run_ended 上的
- * 归属给出摘要；旧日志里两者都没有时没有摘要。
+ * 归属给出摘要；两者都还没写入时没有摘要。
  */
 export function summarize(events: readonly RunEvent[]): RunSummary | undefined {
   const started = find(events, 'run_started')
@@ -71,6 +73,11 @@ export function summarize(events: readonly RunEvent[]): RunSummary | undefined {
   if (started.parentRunId !== undefined) summary.parentRunId = started.parentRunId
   if (started.agent.version !== undefined) summary.agentVersion = started.agent.version
   if (started.task.subject !== undefined) summary.subject = started.task.subject
+  if (started.session) {
+    summary.session = started.session.id
+    summary.turn = started.session.turn
+    if (started.session.continues) summary.continues = started.session.continues.runId
+  }
   if (ended) {
     summary.status = ended.result.status
     if (ended.result.code !== undefined) summary.code = ended.result.code
@@ -114,7 +121,7 @@ export function transcriptMessages(
         messages.push({ role: 'user', content: entry.text })
         break
       case 'hook': {
-        const segments = JSON.parse(blobs.get(entry.content) ?? '[]') as Segment[]
+        const segments = parseCanonical(blobs.get(entry.content) ?? '[]') as Segment[]
         messages.push(...segments.map(segmentToMessage))
         break
       }

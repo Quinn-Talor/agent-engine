@@ -17,6 +17,8 @@ const RESERVE_RATIO = 0.2
 export interface AdmitInput {
   agent: Agent
   task: Task
+  /** 带入的前文：会话的一轮是推导出的窗口，否则是任务的 history。 */
+  history?: readonly ModelMessage[]
   assignment?: { model?: ModelRef }
   caps?: Caps
   hub: ModelHub
@@ -44,10 +46,10 @@ export interface AdmitFailure {
 
 const hasImage = (parts: readonly ContentPart[]) => parts.some((p) => p.type === 'image')
 
-function taskHasImages(task: Task): boolean {
+function taskHasImages(task: Task, history: readonly ModelMessage[]): boolean {
   const segments: Segment[] = [...task.input, ...(task.volatile ?? [])]
   if (segments.some((s) => hasImage(s.parts))) return true
-  return (task.history ?? []).some(
+  return history.some(
     (m: ModelMessage) => m.role === 'user' && Array.isArray(m.content) && hasImage(m.content),
   )
 }
@@ -85,6 +87,7 @@ function unsuitable(
   port: ModelPort,
   agent: Agent,
   task: Task,
+  history: readonly ModelMessage[],
   deliverable: Deliverable,
 ): string | undefined {
   const caps = port.capabilities
@@ -98,7 +101,7 @@ function unsuitable(
   if (deliverable.output.kind === 'structured' && !caps.toolCalls) {
     return `结构化交付需要模型支持工具调用，模型 ${port.ref} 不支持`
   }
-  if (!caps.vision && taskHasImages(task)) return `任务含图片，模型 ${port.ref} 不支持视觉`
+  if (!caps.vision && taskHasImages(task, history)) return `任务含图片，模型 ${port.ref} 不支持视觉`
   return undefined
 }
 
@@ -125,7 +128,7 @@ export function admit(input: AdmitInput): Admitted | AdmitFailure {
     return { ok: false, code: 'model_unsuitable', message: `模型 ${ref} 不存在`, model: ref }
   }
   const deliverable = task.deliverable ?? agent.deliverable ?? defaults.deliverable
-  const reason = unsuitable(port, agent, task, deliverable)
+  const reason = unsuitable(port, agent, task, input.history ?? task.history ?? [], deliverable)
   if (reason) return { ok: false, code: 'model_unsuitable', message: reason, model: ref }
 
   const price = hub.price(ref)

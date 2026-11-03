@@ -147,7 +147,7 @@ describe('environment and engine fingerprints', () => {
     const memory: Memory = {
       id: 'compacting',
       version: '1',
-      start: () => ({ recall: async () => ({ history: [], transcript: [] }) }),
+      start: () => ({ recall: async () => ({}) }),
     }
     expect(engineFingerprint({ memory, guards: [guard('a'), guard('b')] })).not.toBe(
       engineFingerprint({ memory, guards: [guard('a')] }),
@@ -158,7 +158,7 @@ describe('environment and engine fingerprints', () => {
     const memory: Memory = {
       id: 'compacting',
       version: '1',
-      start: () => ({ recall: async () => ({ history: [], transcript: [] }) }),
+      start: () => ({ recall: async () => ({}) }),
     }
     const output = {
       id: 'text',

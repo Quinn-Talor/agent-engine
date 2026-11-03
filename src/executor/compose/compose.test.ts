@@ -14,6 +14,7 @@ import {
   type EventBody,
 } from '../../core/log/events.fixture.js'
 import { canonicalJson } from '../../core/definition/hash.js'
+import { summaryMessage } from '../../core/run/layout.js'
 import { apply, initial, type RunState } from '../../core/run/state.js'
 import { FakeClock } from '../../testing/fake-clock.js'
 import { fakeTool } from '../../testing/fake-tool.js'
@@ -22,12 +23,7 @@ import { prepareTool, type PreparedTool } from '../act/tools.js'
 
 const sys = (text: string): Segment => ({ role: 'system', parts: [{ type: 'text', text }] })
 const user = (text: string): Segment => ({ role: 'user', parts: [{ type: 'text', text }] })
-const passthrough = {
-  recall: async (s: MemoryState): Promise<MemoryView> => ({
-    history: s.history,
-    transcript: s.transcript,
-  }),
-}
+const passthrough = { recall: async (_s: MemoryState): Promise<MemoryView> => ({}) }
 const fold = (bodies: EventBody[]): RunState =>
   sequence(bodies).reduce(apply, initial({ runId: 'r1' }))
 
@@ -69,6 +65,7 @@ function setup(patch: Partial<ComposeDeps> = {}) {
       return ref
     },
     log: (_level, message) => logs.push(message),
+    outputReserve: 0,
     ...patch,
   }
   return { deps, blobs, logs, composer: createComposer(deps) }
@@ -131,19 +128,157 @@ describe('createComposer', () => {
     ])
   })
 
-  it('AC-004 records the compaction with a summary blob', async () => {
+  it('AC-004 renders the declared compaction and records it with a summary blob', async () => {
     const s = setup({
+      memory: { recall: async () => ({ compaction: { upTo: 1, summary: 'what happened' } }) },
+    })
+    const { events, input } = await s.composer.compose(fold([runStarted()]))
+    const built = contextOf(events)
+    expect(built.compaction).toMatchObject({
+      upTo: 1,
+      reason: 'turn_start',
+    })
+    expect(built.compaction!.tokens!.after).toBeLessThan(built.compaction!.tokens!.before + 20)
+    expect(s.blobs.get(built.compaction!.summary)).toBe('what happened')
+    expect(input.messages).toContainEqual(summaryMessage('what happened'))
+    expect(input.messages).not.toContainEqual({ role: 'user', content: 'earlier' })
+  })
+
+  it('§14 writes the compaction every step, the reason only when it changes', async () => {
+    let summary = 'v1'
+    const s = setup({ memory: { recall: async () => ({ compaction: { upTo: 1, summary } }) } })
+    const step = async (n: number) => {
+      const bodies: EventBody[] = [runStarted()]
+      for (let i = 1; i < n; i++)
+        bodies.push(
+          stepStarted(i),
+          contextBuilt(i),
+          modelResponded(i, { text: 'x' }),
+          evaluated(i, { continue: { interventions: [] }, sources: [] }),
+          stepEnded(i),
+        )
+      return contextOf((await s.composer.compose(fold(bodies))).events).compaction
+    }
+    expect(await step(1)).toMatchObject({ reason: 'turn_start' })
+    const same = await step(2)
+    expect(same).toMatchObject({ upTo: 1 })
+    expect(same).not.toHaveProperty('replaced')
+    expect(same).not.toHaveProperty('reason')
+    summary = 'v2'
+    expect(await step(3)).toMatchObject({ reason: 'in_run' })
+  })
+
+  it('§8 puts the memory notice in the tail, not the transcript', async () => {
+    const s = setup({ memory: { recall: async () => ({ notice: '[memory] 压缩暂时不可用' }) } })
+    const { input } = await s.composer.compose(fold([runStarted()]))
+    expect(input.messages.at(-1)).toEqual({ role: 'system', content: '[memory] 压缩暂时不可用' })
+  })
+
+  describe('C: dropping the earliest whole turns when the view still overflows', () => {
+    const long = (text: string) => ({ role: 'user' as const, content: text + '词'.repeat(300) })
+    // 三轮前文，每轮两条，每条约 200 token；窗口 800、不预留输出：丢一轮仍超限，丢两轮放得下。
+    const history = [long('q1'), long('a1'), long('q2'), long('a2'), long('q3'), long('a3')]
+    const sessionSetup = (patch: Partial<ComposeDeps> = {}) =>
+      setup({
+        run: { ...setup().deps.run, model: { ref: 'fake:m', contextLimit: 800 } },
+        task: { input: [user('input')], history, volatile: [] },
+        unavailable: [],
+        session: { turnStarts: [0, 2, 4] },
+        ...patch,
+      })
+
+    it('drops turns from the front until the estimate fits, with a line saying so', async () => {
+      const s = sessionSetup()
+      const { events, input } = await s.composer.compose(fold([runStarted()]))
+      const built = contextOf(events)
+      expect(built.estimate).toBeLessThan(800)
+      expect(built.compaction).toMatchObject({ upTo: 4, reason: 'overflow_drop' })
+      expect(s.blobs.get(built.compaction!.summary)).toBe(
+        '[更早的 2 轮对话已省略，原文保留在会话日志]',
+      )
+      expect(texts(input.messages).some((t) => t?.startsWith('q3'))).toBe(true)
+    })
+
+    it('keeps the carried summary in front of the line', async () => {
+      const s = sessionSetup({
+        task: {
+          input: [user('input')],
+          history: [summaryMessage('s0'), ...history.slice(2)],
+          volatile: [],
+        },
+        session: { summary: 's0', turnStarts: [1, 3] },
+      })
+      const built = contextOf((await s.composer.compose(fold([runStarted()]))).events)
+      expect(s.blobs.get(built.compaction!.summary)).toBe(
+        's0\n\n[更早的 1 轮对话已省略，原文保留在会话日志]',
+      )
+    })
+
+    it('AC-006 records no drop when even the summary alone does not fit', async () => {
+      // 本轮运行记录里一条约 870 token 的回复：丢掉以前的全部轮也放不下。
+      const s = sessionSetup()
+      const state = fold([
+        runStarted(),
+        stepStarted(1),
+        contextBuilt(1),
+        modelResponded(1, { text: '长'.repeat(1300) }),
+        evaluated(1, { continue: { interventions: [] }, sources: [] }),
+        stepEnded(1),
+      ])
+      const built = contextOf((await s.composer.compose(state)).events)
+      expect(built.compaction).toBeUndefined()
+      expect(built.estimate).toBeGreaterThanOrEqual(800)
+    })
+
+    it('AC-005 keeps the last compaction when the memory fails afterwards', async () => {
+      let fail = false
+      const s = sessionSetup({
+        memory: {
+          recall: async () => {
+            if (fail) throw new Error('summarizer down')
+            return { compaction: { upTo: 6, summary: '三轮的摘要' } }
+          },
+        },
+      })
+      const first = contextOf((await s.composer.compose(fold([runStarted()]))).events)
+      expect(first.compaction).toMatchObject({ upTo: 6, reason: 'turn_start' })
+      fail = true
+      const state = fold([
+        runStarted(),
+        stepStarted(1),
+        contextBuilt(1),
+        modelResponded(1, { text: '继续' }),
+        evaluated(1, { continue: { interventions: [] }, sources: [] }),
+        stepEnded(1),
+      ])
+      const second = contextOf((await s.composer.compose(state)).events)
+      expect(second.compaction).toMatchObject({ upTo: 6 })
+      expect(second.compaction).not.toHaveProperty('reason')
+      expect(s.blobs.get(second.compaction!.summary)).toBe('三轮的摘要')
+      expect(s.logs.some((l) => l.startsWith('记忆出错，沿用上一步的压缩'))).toBe(true)
+    })
+
+    it('leaves a run without turn boundaries to the overflow stop', async () => {
+      const s = sessionSetup({ session: undefined })
+      const built = contextOf((await s.composer.compose(fold([runStarted()]))).events)
+      expect(built.compaction).toBeUndefined()
+      expect(built.estimate).toBeGreaterThanOrEqual(800)
+    })
+  })
+
+  it('passes the carried summary and the turn starts to memory', async () => {
+    let seen: MemoryState | undefined
+    const s = setup({
+      session: { summary: 's0', turnStarts: [1] },
       memory: {
-        recall: async () => ({
-          history: [],
-          transcript: [],
-          compaction: { replaced: [0, 6], summary: 'what happened', anchorsKept: 4 },
-        }),
+        recall: async (state) => {
+          seen = state
+          return {}
+        },
       },
     })
-    const built = contextOf((await s.composer.compose(fold([runStarted()]))).events)
-    expect(built.compaction).toMatchObject({ replaced: [0, 6], anchorsKept: 4 })
-    expect(s.blobs.get(built.compaction!.summary)).toBe('what happened')
+    await s.composer.compose(fold([runStarted()]))
+    expect(seen).toMatchObject({ summary: 's0', turnStarts: [1] })
   })
 
   it('passes the fixed token count and the calibrated estimator to memory', async () => {
@@ -160,6 +295,22 @@ describe('createComposer', () => {
     expect(seen).toMatchObject({ step: 1, contextLimit: 10_000 })
     expect(seen!.fixedTokens).toBeGreaterThan(0)
     expect(seen!.estimate([{ role: 'user', content: 'abcd' }])).toBe(1)
+  })
+
+  it('AC-007 gives memory the input limit and caps the output at the reserve', async () => {
+    let seen: MemoryState | undefined
+    const s = setup({
+      outputReserve: 2000,
+      memory: {
+        recall: async (state) => {
+          seen = state
+          return passthrough.recall(state)
+        },
+      },
+    })
+    const { input } = await s.composer.compose(fold([runStarted()]))
+    expect(seen).toMatchObject({ contextLimit: 10_000, inputLimit: 8000 })
+    expect(input.maxOutputTokens).toBe(2000)
   })
 
   it('AC-006 drops tools the exposure invented and logs it', async () => {

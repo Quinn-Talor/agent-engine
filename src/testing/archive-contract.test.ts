@@ -27,6 +27,7 @@ describe('archiveStoreContract on a broken store', () => {
         query: async (filter) => patch(await inner.query(filter)),
         pin: (runId, reason) => inner.pin(runId, reason),
         retain: (policy) => inner.retain(policy),
+        deleteSession: (session) => inner.deleteSession(session),
       }
     }).find((c) => c.name === 'lists unfinished runs without a status')!
 
