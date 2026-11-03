@@ -13,7 +13,7 @@
 
 **承载与使用归引擎，配置与选择归应用。** 引擎不负责：
 - 用哪些 MCP 服务器、装哪些插件、给哪个 agent 什么能力；
-- 会话管理、界面、业务数据；
+- 会话的产品层（会话 id 怎么来、谁能访问、会话列表、界面停在哪个分支）、界面、业务数据；会话的上下文（接续与分叉、下一轮的窗口、跨轮压缩、副作用台账）归引擎，见 §3.15；
 - prompt 内容、工具的业务实现。
 
 ### 0.2 目标
@@ -138,7 +138,7 @@
 | 部分 | 是什么 | 起作用的环节 |
 |---|---|---|
 | 输入 `input` | 本次要做的事：用户消息与附件，或任务说明 | ① 组装 |
-| 背景 `history` | 之前的对话，可以包含上次运行的压缩摘要 | ① 组装 |
+| 背景 `history` | 之前的对话，可以包含上次运行的压缩摘要；会话的一轮不能给，前文由引擎推导（§3.15） | ① 组装 |
 | 易变信息 `volatile` | 日期等每次都可能变的信息，只放在视图尾部 | ① 组装 |
 | 作业范围 `scope` | 在哪儿干活，例如工作区 | ③ 行动（权限、工具） |
 | 业务上下文 `context` | 这张工单的业务参数，例如档案 id、判断时点。引擎不解释，只读地交给工具和组件 | 准备、③ 行动、⑤ 反思、交付 |
@@ -146,7 +146,7 @@
 | 目标 `goal` | 纠偏消息里引用的任务目标；缺省为任务输入的前 200 字 | ⑤ 反思 |
 | 守卫 `guards` | 这张工单的业务守卫，例如"档案版本变了就作废"，来源 `task:<id>` | ④ 观察、⑤ 反思 |
 | 预算 `budget` | 步数、时长、token、费用；不能超过执行环境的上限 | 受理、全程 |
-| 归属 `subject`、`tags` | 会话 id、档案 id；`retryOf` 等标签 | 查询、统计 |
+| 归属 `subject`、`tags` | 会话 id、档案 id（会话的一轮缺省为会话 id）；`retryOf` 等标签 | 查询、统计 |
 
 ### 1.6 运行
 
@@ -174,7 +174,7 @@
 | 循环 | 多步执行、工具调用、子运行 | 多轮对话：每条用户消息开启一次新运行 |
 | 纠偏 | 纠偏消息、封路、收尾、停止 | 重跑：开启新运行，可以换模型、改指令 |
 | 不变 | Agent、任务、执行环境、运行机制、能力快照、模型在运行中都不变（I14） | 要变，就开启新运行 |
-| 状态 | 只在本次运行的日志里 | 跨运行的信息由应用显式带入：history、跨轮摘要 |
+| 状态 | 只在本次运行的日志里 | 会话的下一轮由引擎从会话日志推导带入（§3.15）；不带会话时由应用显式带入 history |
 | 委托人 | 中途引导、审批、中止 | 回复"等待输入"、点重试 |
 | 多 agent | 委托能力发起子运行：独立日志，预算和取消挂在父运行下 | 编排多个独立运行 |
 
@@ -350,7 +350,7 @@ interface RunResult {
 依次检查：
 
 1. **Agent**：工具名不冲突，schema 能编译，能力 id 不重复（`defineAgent` 时已查过，这里核对指纹）。
-2. **任务**：history 里的工具调用成对；附件与模型能力匹配；预算不超过执行环境的上限；设了 `maxCost` 时，模型库里必须有该模型的价格。
+2. **任务**：history 里的工具调用成对；附件与模型能力匹配；预算不超过执行环境的上限；设了 `maxCost` 时，模型库里必须有该模型的价格。会话的一轮（§3.15）不能再给 history，接续点必须是同一会话里的一轮（`invalid_task`）；同一会话有运行中的轮时受理失败 `session_busy`（可重试）。
 3. **模型**：按 §1.8 解析并核对要求。
 4. **准入**：先受执行环境的并发运行上限约束，再按引擎的全局准入排队（§5.3）。
 
@@ -369,7 +369,7 @@ interface RunResult {
 
 | 项目 | 内容 |
 |---|---|
-| 做什么 | 检查取消和预算 → 追加上一步留下的提示和委托人引导 → 记忆给出 history 和运行记录的视图 → 工具呈现给出本步可见的工具 → 按固定布局拼成模型输入 → 复核成对、工具子集、前缀哈希 → 检查是否超出上下文上限 |
+| 做什么 | 检查取消和预算 → 追加上一步留下的提示和委托人引导 → 工具呈现给出本步可见的工具 → 记忆给出压缩决定，引擎按决定渲染 history 和运行记录（会话窗口仍超限时丢掉最早的整轮）→ 按固定布局拼成模型输入 → 复核工具子集、前缀哈希 → 检查是否达到输入上限（模型窗口减去输出预留） |
 | 槽位 | 记忆：`recall(state)`；工具呈现：`visible(state)` |
 | 事件 | `step_started`、`intervention_applied`、`context_built` |
 | 去向 | → ②；超限 → 结束，`stopped` / `context_overflow` |
@@ -500,7 +500,7 @@ interface RunResult {
 
 **没开始就结束的运行**（受理失败、排队超时、须知拦下、引擎已关闭）只有 `run_ended`：它带上 `origin`（根运行、父运行、执行环境、Agent、指纹、主题），档案据此生成运行摘要，可以按状态和主题查到，也会按保留期清理。
 
-**接着做**：引擎不提供续跑。要接着做中断或已结束的工作，应用开启新的运行，把上次运行的运行记录（`Transcript` 投影）作为新任务的 history，并追加 `retrospect.brief`（试过什么、卡在哪里、已执行和可能已执行的副作用）。这和多轮对话的方式一致；运行中的引导用 `steer`。
+**接着做**：引擎不提供续跑。多轮对话和接着做中断或已结束的工作，都用会话开启新的一轮（§3.15）：前文由引擎从会话日志推导，中断的轮带着一行结局说明，可能已执行的副作用在台账里。不带会话时，应用仍可以把上次运行的运行记录（`Transcript` 投影）作为新任务的 history，并追加 `retrospect.brief`。运行中的引导用 `steer`；运行结束后 `steer` 返回 `false`。
 
 | 结局 | 含义 | 典型 code |
 |---|---|---|
@@ -525,7 +525,7 @@ interface RunResult {
 
 - 只追加、不插入，不会拆开工具调用和结果的成对关系（I2），也不会改写已有前缀（I3）。
 - 提示一旦生效就永久保留。
-- `Transcript` 投影保留每条的 `origin`，应用据此决定哪些内容带进下一轮的 history。
+- `Transcript` 投影保留每条的 `origin`：会话的下一轮只带模型回复、工具调用与结果、委托人引导和交付退回的提示（§3.15）。
 
 **视图布局固定**，由核心按稳定程度排列，不开放：
 
@@ -535,7 +535,7 @@ interface RunResult {
 ```
 
 - 须知对同一执行环境里的所有 Agent 都相同，可以在不同 Agent 之间共享缓存。
-- 记忆只压缩 history 和运行记录，不碰任务输入。压缩只改变视图，并且必须写进日志。
+- 记忆只压缩 history 和运行记录，不碰任务输入。记忆只给出决定（前 `upTo` 条换成摘要），视图由引擎渲染（`renderView`）；压缩只改变视图，并且每一步都写进日志。
 
 ### 3.14 并发、取消与限额
 
@@ -557,7 +557,7 @@ interface RunResult {
 
 | 限额 | 归谁 | 默认值 | 用完时 |
 |---|---|---|---|
-| 步数、总时长、收尾预留、token、费用 | 任务的预算，不超过执行环境的上限 | 1000 步；时长不限（子运行必填）；收尾预留 min(120 秒, 总时长的 20%)，给出的预留不小于总时长时同样收紧 | 守卫：收尾或停止 |
+| 步数、总时长、收尾预留、token、费用 | 任务的预算，不超过执行环境的上限 | 1000 步；时长不限（子运行不超过父运行剩余的时长，两边都没设时 10 分钟）；收尾预留 min(120 秒, 总时长的 20%)，给出的预留不小于总时长时同样收紧 | 守卫：收尾或停止 |
 
 **收尾预留的保护**：模型调用最晚在"截止时刻 − 收尾预留"被截断（`model_aborted` 带 `deadline: true`，不算取消），这一步按没有完成的回复评估，随后按 `timeout` 走兜底。兜底不超过离截止实际剩下的时间；截止在兜底中途到达时仍交出固定文本，以 `finalized` / `timeout` 结束。时间到停止（没有收尾预留时）的运行不把最后一步的文本当作交付。
 | 并发运行数 | 执行环境的上限 | 不限（仍受全局准入约束） | 受理排队 |
@@ -573,6 +573,29 @@ interface RunResult {
 预算的计入范围：主模型调用、记忆和监督的模型调用、子运行。所有时间都取自时钟。
 
 ---
+
+### 3.15 会话
+
+多轮对话是一串按接续关系连起来的运行（完整方案见 [session-design.md](session-design.md)）。会话的产品层（id、权限、列表、界面）归应用，上下文层归引擎：
+
+```ts
+environment.start(agent, task, { session: 'case-1024' })                    // 接着最新的一轮
+environment.start(agent, task, { session: 'case-1024', continues: runId })  // 从指定的一轮分叉
+environment.start(agent, task, { session: 'case-1024', continues: null })   // 从头开始
+engine.previewWindow({ session: 'case-1024' })                              // 下一轮会带入的窗口；有一轮正在运行时 session_busy
+engine.deleteSession('case-1024')                                           // 整个会话一起删除
+```
+
+| 方面 | 做法 |
+|---|---|
+| 会话日志与窗口 | 会话日志是各轮的运行日志，只追加；窗口是某一轮开始时带入的前文，由 carry 从接续点的窗口与日志确定性地推导，冻结进 `run_started`（I17） |
+| carry | 套上接续点最后一次已提交的压缩；按视图顺序拼起前文、任务输入、运行记录；只带模型回复、工具调用与结果、委托人引导和交付退回的提示；补齐成对；补上结局（兜底文字、没有正常结束时一行说明）和最后一次组装之后才到的引导 |
+| 窗口大小 | 每轮按本轮模型计算：可用空间 = 窗口 − 输出预留 − 固定占用；轮开始线 50%、轮中触发线 80%、保留线 10%、摘要上限 10%（§11 `compactingMemory`） |
+| 超限裁剪 | 压缩之后仍达到输入上限时，引擎确定性地丢掉前文里最早的整轮，摘要后加一行说明；不调用模型 |
+| 副作用台账 | 本会话已执行和可能已执行的副作用，含子运行的；沿序号递推（分支之间共享），最多 50 条，放在尾部，不交给摘要模型（I15 跨轮） |
+| 串行与分叉 | 同一会话一次一轮（包括不同分支），第二轮 `session_busy`；一个档案只由一个引擎实例写；分叉就是 `continues` 指向的不是最新一轮 |
+| 子运行 | 只有根运行是轮；子运行按 `rootRunId` 归到它的轮 |
+| 保留与删除 | 会话按整体过期与删除，不会只剩半条链 |
 
 ## 4. 扩展架构
 
@@ -684,7 +707,7 @@ interface Prepared {
 | 能力（准备） | 宿主、凭据解析、截止时间 | 产出工具、说明、守卫、快照 | 读运行记录；改其他能力 | 不进入本次运行，记入 `run_started` |
 | 工具 | 自己的输入；`ToolCtx` | 执行业务动作；发起子运行 | 读运行记录；写日志；绕过权限 | 包成错误信封回给模型 |
 | 工具呈现 | 已准备的工具、运行记录里的工具调用 | 决定本步可见哪些工具 | 加入不存在的工具 | 退回为"全部可见" |
-| 记忆 | history、运行记录、模型窗口、估算器 | 返回视图，必要时压缩 | 改写日志里的运行记录；动任务输入；拆开成对 | 出错或超时：沿用完整视图（不压缩），超出上下文时按超限停止；视图拆开成对或改写记录：运行失败，`engine_error` |
+| 记忆 | history、运行记录、模型窗口与输入上限、估算器；会话的一轮另有带入的摘要与轮起点 | 返回压缩决定（前 `upTo` 条换成摘要）与尾部提示 | 改写传入的消息；动任务输入；切点拆开成对 | 出错、超时、返回值不合格、切点拆开成对或超出范围：沿用上一步生效的压缩（第 1 步为不压缩），超出输入上限时按超限停止 |
 | 守卫 | 本步事实、运行信息、自己的运行内状态 | 告知（可带封路）、等待输入、终止 | 给出完成；执行动作；改视图 | 本步没有意见，记入日志；`onError: 'stop'` 时停止 |
 | 输出契约 | 候选交付 | 判断格式是否合格 | 改写交付内容 | 视为不合格 |
 | 验收 | 候选交付、语料 | 通过，或给出问题和提示 | 改写交付内容 | 视为通过，记入日志 |
@@ -889,12 +912,12 @@ type RunEvent = { seq: number; at: number } & (
       environment: { name: string; fingerprint: string; principalReachable: boolean };
       engine: { fingerprint: string };
       capabilities: CapabilitySnapshot[]; unavailable: Array<{ capability: string; reason: string }>;
-      model: ModelRef; queuedMs: number;
-      parentRunId?: string; rootRunId: string; schemaVersion: number }
+      model: ModelRef; contextLimit: number; outputReserve: number; queuedMs: number;
+      parentRunId?: string; rootRunId: string; schemaVersion: number; session?: SessionStarted }
   | { t: 'step_started'; step: number }
   | { t: 'intervention_applied'; step: number; intervention: Intervention; source: string; until?: number }
   | { t: 'context_built'; step: number; messages: BlobRef[]; tools: string[]; estimate: number;
-      compaction?: { replaced: [number, number]; summary: BlobRef; anchorsKept: number } }
+      compaction?: { upTo: number; summary: BlobRef; reason?: CompactionReason; tokens?: { before: number; after: number } } }
   | { t: 'model_responded'; step: number; response: ModelResponse; startedAt: number; firstTokenAt?: number }
   | { t: 'model_failed'; step: number; error: ModelError; partialText?: string; startedAt: number }
   | { t: 'model_aborted'; step: number; partialText: string }
@@ -926,7 +949,8 @@ type RunEvent = { seq: number; at: number } & (
 - **按消息存 blob**：`context_built` 只记录每条消息的 blob 引用，blob 按 sha256 去重。
 - **工具结果存两份**：`shown` 是模型实际看到的内容；`raw` 是原始输出，超过 1MB 时截断，并记录原始大小。
 - **先脱敏再写入**：凭据引用解析出的值（8 位以上）、provider key 原值，以及 `sk-`、`Bearer` 等模式；先编码成 JSON 再脱敏的文本，也按凭据的 JSON 转义形式替换。blob 引用和 id、哈希、指纹字段不脱敏，避免破坏引用。
-- **任务内容**：`run_started.task.content` 引用任务输入与 history 的 blob，回归重放据此重建交付验收的语料。
+- **任务内容**：`run_started.task.content` 引用任务输入与 history 的 blob，回归重放据此重建交付验收的语料；会话的一轮里 history 就是冻结的窗口，元数据（序号、接续点、轮起点、摘要、台账）在 `run_started.session`。
+- **输出预留**：`run_started.outputReserve` 记下给输出留的 token（模型声明的输出上限，最多取窗口的一半），输入上限 = `contextLimit` − 它；两个字段都必填。
 - **补齐缺失的结果**：工具结果没能写进日志（例如存储暂时失败）时，运行结束前补上 `TOOL_MISSING_RESULT`，保证调用都有结果；它和 `TOOL_ABORTED` 一样计入"可能已执行"的副作用。
 
 ### 6.3 投影
@@ -1008,7 +1032,7 @@ type RunEvent = { seq: number; at: number } & (
 | I4 | 组件只能收窄能力，不能放大 | 可见工具必须是已准备能力的子集；权限规则只能拒绝；干预只有纠偏消息和封路 |
 | I5 | 工具层的任何失败都包成错误信封回给模型 | 流水线的每个环节都产出 `ToolErrorEnvelope` |
 | I6 | 不合格的交付不会以 `completed` 结束 | 交付环节先校验输出；拦截类验收不通过时退回（次数用完后放行，问题写入 `quality`） |
-| I7 | 上下文估算达到上限时，不调用模型 | 在 ① 组装强制检查 |
+| I7 | 上下文估算达到输入上限（模型窗口减去输出预留）时，不调用模型 | 在 ① 组装强制检查；主调用与兜底调用的 `maxOutputTokens` 取输出预留 |
 | I8 | 每一次模型调用都写入日志并计入预算 | 组件只能通过 `ctx.callModel` 调用模型 |
 | I9 | 模型错误一定带上分类后的错误码 | 以 `failed` / `model_error` 结束，`error.code` 为分类码 |
 | I10 | 相同的事件序列产生相同的状态和环节 | 核心是纯函数；组件只能从 `ctx` 取时间、随机数和做 I/O |
@@ -1018,6 +1042,7 @@ type RunEvent = { seq: number; at: number } & (
 | I14 | 运行中 Agent、任务、执行环境、记忆与守卫、能力快照、模型都不变 | 执行器只读取它们；`run_started` 记下指纹 |
 | I15 | 有副作用的工具调用永不自动重做 | 失败重试按副作用类型处理；进程中断后不重做，在复盘说明里标为"可能已执行"；结果未知的调用第 1 次就封住相同输入 |
 | I16 | 守卫终止前先告知 | 同一来源在运行中（或最近一次引导之后）没有告知过就要求终止时，评估把它改为告知并顺延一步；结束时自检 |
+| I17 | 会话的每一轮带入的窗口都能从会话日志重新推导出来 | 窗口在受理时由 carry 确定性地推导、冻结进 `run_started`；同一 carry 版本下，它等于接续点的窗口与日志（读到记下的事件序号为止）推导的结果，台账等于来源那一轮的台账加它及其子运行的副作用；`testing` 的 `sessionLogIssues` 逐轮复核 |
 
 ---
 
@@ -1141,7 +1166,7 @@ interface ToolCtx {
 | 模型 | 子 agent 的偏好 > 父运行的模型 > 模型库默认值；同样核对子 agent 的要求（§1.8） |
 | 深度 | 不超过 `caps.delegation.depth`（默认 3），超出返回 `SPAWN_DEPTH_EXCEEDED` |
 | 防环 | 沿血缘检查 `agent.id`，不允许委托给自己或任何祖先：`SPAWN_CYCLE` |
-| 预算 | 不超过父运行的剩余额度：`SPAWN_BUDGET`；剩余额度扣除正在运行的子运行预留的费用，并行委托不会各拿一份；父运行有费用上限而子运行的模型没有价格时拒绝委托（`SPAWN_BUDGET`）；子运行的用量计入父运行，调用工具已经返回后才结束的子运行也计入 |
+| 预算 | 不超过父运行的剩余额度：`SPAWN_BUDGET`；父运行和子运行都没有时长上限时，子运行用 10 分钟；剩余额度扣除正在运行的子运行预留的费用，并行委托不会各拿一份；父运行有费用上限而子运行的模型没有价格时拒绝委托（`SPAWN_BUDGET`）；子运行的用量计入父运行，调用工具已经返回后才结束的子运行也计入 |
 | 取消与日志 | 子运行挂在取消树上，有独立的日志；发起委托的工具调用超时或被取消时，它的子运行随之取消；父运行结束时最多等 `childDeliveryWaitMs`（默认 10 秒），之后取消还在运行的子运行；父运行的 `tool_finished` 记录 `childRunId`（一次调用发起多个时 `childRunIds` 全部列出）。子运行的时长上限是父运行剩余时长减去父运行的收尾预留；标准委托工具把父运行的工作区（`scope`）带给子运行 |
 | 结果 | 委托工具把子运行的 `RunResult` 映射成文本或 `SUBAGENT_*` 信封 |
 
@@ -1169,15 +1194,16 @@ interface ArchiveStore {
   getBlob(ref: BlobRef): Promise<string | Uint8Array>
   query(filter: RunFilter): Promise<RunSummary[]>
   pin(runId: string, reason: string): Promise<void>
-  retain(policy: RetentionPolicy): Promise<RetainReport>
+  retain(policy: RetentionPolicy): Promise<RetainReport>          // 会话按整体过期
+  deleteSession(session: string): Promise<RetainReport>           // 整个会话（含子运行与固定的运行）；有没结束的运行时拒绝
 }
 ```
 
-自带内存实现和 SQLite 实现（`sqliteArchive({ file, retention })`）。
+自带内存实现和 SQLite 实现（`sqliteArchive({ file, retention })`）。应用删除会话用 `engine.deleteSession`：先占住会话（`session_busy`），再调用档案；档案里有没结束的运行时返回 `session_open`。
 
 ```sql
 runs   (run_id PK, root_run_id, parent_run_id, environment, environment_fp, engine_fp,
-        agent_id, agent_version, agent_fp, model, subject,
+        agent_id, agent_version, agent_fp, model, subject, session, turn, continues,
         status, code, started_at, ended_at, steps, tool_calls,
         input_tokens, output_tokens, cache_read, cache_write, memory_tokens, supervision_tokens, cost,
         pinned, schema_version)               -- 物化的运行摘要，可以从 events 重建
@@ -1185,15 +1211,16 @@ events (run_id, seq, type, at, payload, PRIMARY KEY (run_id, seq))
 blobs  (sha PK, size, encoding, data, created_at)
 meta   (key PK, value)
 -- 索引：runs(subject, started_at)、runs(parent_run_id)、runs(root_run_id)、
---       runs(agent_id, agent_version, started_at)、runs(environment, status, started_at)
+--       runs(agent_id, agent_version, started_at)、runs(environment, status, started_at)、
+--       runs(session, turn)
 ```
 
 | 方面 | 做法 |
 |---|---|
 | 写入 | WAL，`synchronous=NORMAL`；一次 `append` 是一个事务，包含一个环节产生的全部事件和 blob；在 `run_started`、`step_ended`、`run_ended` 时更新 `runs`；超过 4KB 的 blob 用 gzip 压缩 |
 | 读取 | 按 seq 流式读出，blob 按需加载；应用优先使用投影 API |
-| 保留 | 按执行环境配置保留天数，默认 30 天；被 pin 的运行永久保留；清理后对 blob 做标记清除 |
-| 版本 | 表结构版本记在 `meta.schema_version`；事件格式版本记在 `run_started.schemaVersion`，读取时由升级器升级 |
+| 保留 | 按执行环境配置保留天数，默认 30 天；被 pin 的运行永久保留；会话按整体过期：会话里的每个运行（含子运行）都过期了才一起清理，有固定的运行时整个会话保留；清理后对 blob 做标记清除 |
+| 版本 | 表结构版本记在 `meta.schema_version`，版本不同的文件拒绝打开，不做迁移；事件格式版本记在 `run_started.schemaVersion`，读取时由升级器升级 |
 | 性能 | 单写多读；按环节批量提交；宿主进程卡顿时把引擎整体迁到独立的工作进程 |
 
 ### 8.6 估算器
@@ -1252,17 +1279,27 @@ interface Exposure extends Component {
 ```ts
 interface Memory extends Component {
   start(run: RunInfo, ctx: ComponentCtx): {
-    recall(state: MemoryState): Promise<MemoryView>   // MemoryState：history、运行记录、估算、模型窗口
+    recall(state: MemoryState): Promise<MemoryView>
   }
 }
-interface MemoryView {
+interface MemoryState {
+  step: number
   history: ModelMessage[]
-  transcript: ModelMessage[]                          // 切分点必须落在成对边界上
-  compaction?: { replaced: [number, number]; summary: string; anchorsKept: number }
+  transcript: ModelMessage[]
+  contextLimit: number
+  inputLimit: number                                  // 模型窗口减去输出预留
+  fixedTokens: number                                 // 须知、指令、能力说明、任务输入、尾部、工具定义
+  estimate(messages: ModelMessage[]): number
+  summary?: string                                    // 会话的一轮：history 第一条是带入的摘要时的正文
+  turnStarts: number[]                                // 每一轮在 history 里的起点；不带会话的运行为空
+}
+interface MemoryView {
+  compaction?: { upTo: number; summary: string }      // history + 运行记录的前 upTo 条换成摘要；每一步给出当时生效的压缩
+  notice?: string                                     // 本步附在尾部的提示，不进运行记录
 }
 ```
 
-记忆只决定 history 和运行记录在视图里的样子；须知、Agent 指令、能力说明、任务输入由核心原样放入固定布局。
+记忆只给出决定，视图由引擎渲染（`renderView`）：组装、会话的下一轮窗口与预览用同一个函数，模型看到的前文只可能是原样的前文，或者套上一次已声明的压缩。记忆拿到的是深拷贝；记忆出错、超时或决定不合格时沿用上一步生效的压缩，压缩不会因为记忆失败而退回。须知、Agent 指令、能力说明、任务输入由核心原样放入固定布局。
 
 ### 9.4 守卫 `Guard`
 
@@ -1390,7 +1427,7 @@ interface AskRequest {
 interface Approver {
   approve(req: AskRequest & { callId: string; toolName: string }, run: RunInfo):
     Promise<{ approved: boolean; remember?: { scope: 'session' | 'always'; pattern?: string } }>
-    // "本会话记住"由实现按 run.task.subject 区分，引擎不知道会话
+    // "本会话记住"由实现按 run.task.subject 区分（会话的一轮缺省为会话 id）
 }
 interface NoticeProvider extends Component {
   provide(run: RunInfo, ctx: ComponentCtx): Promise<Segment[]>
@@ -1482,7 +1519,7 @@ MCP 工具在引擎里叫 `<服务器名>__<工具名>`，交给 hook 匹配和�
 | 审批 | 工具流水线 e 环节 | §9.10 |
 | 中止 `run.abort()` | 任何时刻 | §3.14 的取消树 |
 
-运行以 `awaiting_input` 结束后，委托人的回复开启新的一次运行，并带上之前的 history。
+运行以 `awaiting_input` 结束后，委托人的回复作为会话的下一轮（§3.15）；不带会话时，开启新的一次运行并带上之前的 history。
 
 ### 10.6 标准验收
 
@@ -1544,14 +1581,13 @@ MCP 工具在引擎里叫 `<服务器名>__<工具名>`，交给 hook 匹配和�
 | 观测导出 | `otelExporter(opts)`、`langfuseExporter(opts)` | 订阅者：把运行事件转换成外部追踪工具的数据；失败只写诊断日志（§6.6） |
 | 文本处理 | `grounding` | 引用核对函数被 `groundingCheck` 和 `grounding.sanitize` 共用；`sanitize` 把无法核实的内容替换为 `⟨unverifiable⟩` 或 `⟨ungrounded:X⟩` |
 
-**`compactingMemory`**（`{ trigger, keepRecentTokens, anchors, model }`）
+**`compactingMemory`**（`{ trigger, turnStart, keepRatio, keepRecentTokens, summaryRatio, maxHistoryTokens, anchors, model }`）
 
-- 估算值达到模型窗口 × `trigger`（默认 0.8）时触发，范围是 history 和运行记录。
-- 保留最近 `keepRecentTokens` 的原文（切分点落在成对边界上），以及最近 `anchors` 组（默认 4 组）工具交换。
-- 其余内容压成 5 个字段的结构化摘要：意图、关键事实、未完成的动作、已解决的问题、当前阻塞。摘要默认使用运行的模型，可以用 `model` 指定。
-- 摘要写入 `context_built.compaction`，应用可以把它作为下次任务的 history。
-- 增量压缩：保留上一次的摘要和它覆盖到的位置，再压缩时只把新切出的消息并进已有摘要；单次摘要请求不超过窗口的一半，超长时分批；两次压缩之间摘要不变，缓存前缀保持稳定。
-- 连续失败 3 次后冷却 60 秒，冷却期间在尾部加一条警告。
+- 各条线按可用空间（输入上限减去固定占用）计算：第 1 步带入的前文超过 `turnStart`（默认 0.5）、任一步前文 + 运行记录超过 `trigger`（默认 0.8）时触发；`maxHistoryTokens` 给出时，可用空间按 min(可用空间, 它 ÷ `turnStart`) 计算。
+- 保留不超过 `keepRatio`（默认 0.1，`keepRecentTokens` 给出绝对值时以它为准）的最近原文，切点落在成对边界上；切点落在以前各轮里时顺延到下一轮的起点；本轮最近 `anchors` 组（默认 1 组）工具交换超过保留线也保留。
+- 其余内容压成 5 个字段的结构化摘要：意图、关键事实、未完成的动作、已解决的问题、当前阻塞。摘要请求的 `maxOutputTokens` 为可用空间的 `summaryRatio`（默认 0.1，至少 256，不超过摘要模型的输出上限，也不超过它的窗口减去输入预算）；被截断时要求压短重试一次。摘要默认使用运行的模型，可以用 `model` 指定，分块按两个模型中较小的窗口计算。
+- 增量压缩：保留上一次的摘要和它覆盖到的位置，再压缩时只把新切出的消息并进已有摘要；会话的一轮从带入的摘要接着合并；单次摘要请求不超过窗口的一半，超长时分批；两次压缩之间摘要不变，缓存前缀保持稳定；同一时刻只做一次摘要，上一次还没结束时不再发起。
+- 连续失败 3 次后冷却 60 秒，冷却期间在尾部加一条提示。
 
 工具自身的输入安全（例如 shell 工具的危险命令黑名单）由工具的 `validate` 负责，引擎在流水线的 d 环节强制执行。
 
@@ -1675,6 +1711,8 @@ src/
 test/
   arch/          依赖方向、项目文档与仓库配置的一致性
   integration/   引擎级测试，按主题分组：lifecycle、supervision、mcp、components
+examples/        按应用的写法使用包名（agent-engine、agent-engine/testing），自带 tsconfig；
+  legal-consult/   律所劳动争议咨询平台：覆盖每一类组件的完整示例
 ```
 
 单元测试与源文件同目录（`<名称>.test.ts`）；只被测试使用的构造放在 `*.fixture.ts`，构建和覆盖率都排除。

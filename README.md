@@ -2,7 +2,7 @@
 
 agent-engine 是一个 TypeScript 库：应用定义 Agent、组装任务、在执行环境里启动运行，引擎按固定流程把运行可靠地跑完，返回结果和完整的运行日志。
 
-**承载与使用归引擎，配置与选择归应用。** 引擎不负责用哪些 MCP 服务器、装哪些插件、给哪个 agent 什么能力，也不负责会话、界面、业务数据和 prompt 内容。
+**承载与使用归引擎，配置与选择归应用。** 引擎不负责用哪些 MCP 服务器、装哪些插件、给哪个 agent 什么能力，也不负责会话的产品层（会话 id、权限、列表）、界面、业务数据和 prompt 内容；会话的上下文（接续、窗口、跨轮压缩）归引擎。
 
 - 运行一定会结束：外部依赖和组件的失败有边界、有降级、可恢复。
 - 可预测、可重放：运行日志是唯一的事实来源，状态、trace、统计、复盘都从它推导。
@@ -105,23 +105,31 @@ console.log(result.status, result.code, result.text, result.intent)
 
 ### 多轮对话与接着做
 
-引擎不提供续跑。要接着对话或接着做中断的工作，应用开启新的运行，把上次运行的运行记录作为新任务的 `history`：
+多轮对话用会话：每一轮开始时给出会话 id，引擎从会话日志推导这一轮带入的前文（接续、跨轮压缩、副作用台账、上一轮的结局），应用只管会话 id 和界面（完整方案见 [docs/session-design.md](docs/session-design.md)）：
 
 ```ts
-import { foldState, retrospect, retrospective, transcriptMessages } from 'agent-engine'
+const first = environment.start(agent, ask('公司拖欠我工资，能拿回多少？'), {
+  session: 'case-1024',
+})
+await first.result // awaiting_input：律师追问入职时间与月薪
 
-// 上次运行的事件（从档案读出）→ 运行记录投影成消息；工具结果正文按 blob 引用从档案读取。
-const { transcript } = foldState(events)
-const history = [previousInput, ...transcriptMessages(transcript, blobs)]
+// 委托人的回答是会话的下一轮；任务不再给 history。
+const second = environment.start(agent, ask('2021 年入职，月薪 12000 元'), { session: 'case-1024' })
 
-// 进程中断的运行：引擎启动时补齐结尾（没有结果的工具调用补上 TOOL_INTERRUPTED），由应用决定是否接着做。
-for (const summary of await engine.interrupted()) {
-  const brief = retrospect.brief(retrospective(eventsOf(summary.runId)))
-  // brief 列出试过的做法、卡住的地方、已执行和"可能已执行"的副作用，追加到新任务的输入里。
-}
+// 编辑旧消息或重新生成：从指定的一轮分叉；continues: null 从头开始。
+environment.start(agent, ask('换个问法'), { session: 'case-1024', continues: first.runId })
+
+await engine.previewWindow({ session: 'case-1024' }) // 下一轮会带入什么，不调用模型
+await engine.deleteSession('case-1024') // 整个会话（含子运行）一起删除
 ```
 
+同一会话一次只跑一轮，第二轮受理失败 `session_busy`（可重试）；运行中的追加用 `run.steer(text)`，运行结束后它返回 `false`。进程中断的轮在引擎启动时补齐结尾，下一轮照常接上：中断的轮带着一行结局说明，可能已执行的副作用在台账里。
+
 运行中的引导用 `run.steer(text)`，取消用 `run.abort()`。要同时收到子运行的事件和通知（例如把整棵委托树导出到观测后端），订阅时传 `{ children: true }`，用回调的 `run.runId` 区分是哪次运行。
+
+## 示例
+
+[`examples/legal-consult`](examples/legal-consult/README.md)：一家律所的劳动争议咨询平台，覆盖引擎的每一类组件，多数是自定义的，并带九个可运行的场景（`npm run demo:legal`）。
 
 ## 核心概念
 
@@ -130,7 +138,7 @@ for (const summary of await engine.interrupted()) {
 | 引擎 `Engine`          | 平台服务（模型库、能力宿主、运行档案、凭据库、时钟、准入）与运行机制（记忆、监督） |
 | 执行环境 `Environment` | 在这里工作的所有 agent 必须遵守的规矩：委托人、须知、权限、规定、强制验收、上限    |
 | Agent                  | 谁来做：指令、能力、默认交付物、模型偏好                                           |
-| 任务 `Task`            | 这次做什么：输入、history、作业范围、交付物、约束条件、预算                        |
+| 任务 `Task`            | 这次做什么：输入、history（不带会话时）、作业范围、交付物、约束条件、预算          |
 | 运行 `Run`             | 一次执行的全过程；日志只追加，是唯一的事实来源                                     |
 
 每一步按固定流程执行：**组装**视图 → **推理** → **行动**（权限、审批、并发执行工具）→ **评估**（观察 → 守卫意见 → 判定，继续时带上纠偏消息）→ **交付**（输出契约 → 验收 → 兜底）。事实、意见、裁决分开记录，每个裁决都能追溯到来源。
