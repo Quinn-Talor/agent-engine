@@ -3,7 +3,7 @@
 // 依赖不可用由失败连击（external_failure）与封路处理。
 
 import { z } from 'zod'
-import { hashOf, toolError } from '../../sdk.js'
+import { hashOf, toolContent, toolError } from '../../sdk.js'
 import type {
   Capability,
   JsonValue,
@@ -139,6 +139,18 @@ function mapResult(r: McpCallResult, errorClass?: 'deterministic' | 'transient')
   if (r.isError) {
     const envelope = toolError('TOOL_EXCEPTION', text || 'MCP 工具返回错误')
     return errorClass ? { ...envelope, errorClass } : envelope
+  }
+  // 图片块交给模型看（toolContent）；其他非文本块仍是一行占位。
+  if (r.content.some((c) => c.type === 'image' && typeof c.data === 'string')) {
+    return toolContent(
+      r.content.map((c) =>
+        c.type === 'text'
+          ? { type: 'text' as const, text: c.text ?? '' }
+          : c.type === 'image' && typeof c.data === 'string'
+            ? { type: 'image' as const, image: c.data, mediaType: c.mimeType ?? 'image' }
+            : { type: 'text' as const, text: `[${c.type}]` },
+      ),
+    )
   }
   if (!text && r.structuredContent !== undefined) return JSON.stringify(r.structuredContent)
   return text

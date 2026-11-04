@@ -32,6 +32,7 @@ function started(seq: number, at: number, subject: string): RunEvent {
     model: 'contract:model',
     contextLimit: 10_000,
     outputReserve: 0,
+    modelFingerprint: 'model-fp',
     queuedMs: 0,
     rootRunId: 'root',
     schemaVersion: SCHEMA_VERSION,
@@ -47,7 +48,14 @@ function ended(seq: number, at: number, runId: string): RunEvent {
     runId,
     status: 'completed',
     model: 'contract:model',
-    usage: { ...usage(), main: usage(), memory: usage(), supervision: usage(), children: usage() },
+    usage: {
+      ...usage(),
+      main: usage(),
+      memory: usage(),
+      supervision: usage(),
+      tools: usage(),
+      children: usage(),
+    },
     steps: 0,
     toolCalls: 0,
   }

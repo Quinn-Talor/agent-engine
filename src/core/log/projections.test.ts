@@ -130,6 +130,43 @@ describe('foldState', () => {
 })
 
 describe('transcriptMessages', () => {
+  it('AC-015 renders the images of a tool result after its text', () => {
+    const entries: TranscriptEntry[] = [
+      {
+        origin: 'tool',
+        step: 1,
+        results: [
+          {
+            callId: 'c1',
+            toolName: 'screenshot',
+            shown: 'sha256:out',
+            isError: false,
+            images: [{ blob: 'sha256:img', mediaType: 'image/png' }],
+          },
+        ],
+      },
+    ]
+    const blobs = new Map([
+      ['sha256:out', '<tool_output>截图如下</tool_output>'],
+      ['sha256:img', 'AQID'],
+    ])
+    expect(transcriptMessages(entries, blobs)).toEqual([
+      {
+        role: 'tool',
+        content: [
+          {
+            type: 'tool-result',
+            toolCallId: 'c1',
+            toolName: 'screenshot',
+            output: '<tool_output>截图如下</tool_output>',
+            isError: false,
+            images: [{ type: 'image', image: 'AQID', mediaType: 'image/png' }],
+          },
+        ],
+      },
+    ])
+  })
+
   it('AC-005 turns entries into model messages', () => {
     const notice: Segment[] = [{ role: 'system', parts: [{ type: 'text', text: 'org notice' }] }]
     const entries: TranscriptEntry[] = [

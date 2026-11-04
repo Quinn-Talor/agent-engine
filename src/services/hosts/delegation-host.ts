@@ -52,6 +52,14 @@ function mapResult(result: RunResult): unknown {
     case 'finalized':
       return `（阶段性结果，子 agent 未完成：${code}）\n${text}`
     case 'awaiting_input':
+      // 子运行在等审批：用同一个错误码，父运行同样以 approval_pending 结束。
+      if (result.code === 'approval_pending') {
+        return toolError(
+          'APPROVAL_PENDING',
+          `子 agent 的操作在等委托人审批：${message}`,
+          '不要重试，也不要换做法；委托人答复后会接着做',
+        )
+      }
       return toolError('SUBAGENT_NEEDS_INPUT', message, '补充信息后重新委托，或自己完成')
     case 'stopped':
       return toolError('SUBAGENT_STOPPED', message, '换一种做法，或自己完成')
@@ -77,7 +85,8 @@ export function delegationHost(): DelegationHost {
       required: ['agent', 'task'],
       additionalProperties: false,
     },
-    execution: { timeoutMs: DELEGATE_TIMEOUT_MS },
+    // 子运行的副作用另进台账；委托本身按有副作用处理（I15）。
+    execution: { effect: 'side_effect', timeoutMs: DELEGATE_TIMEOUT_MS },
     async execute(input, ctx) {
       const { agent, task } = input as { agent: string; task: string }
       const spec = runs.get(ctx.runId)?.specs.get(agent)

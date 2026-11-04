@@ -123,6 +123,27 @@ describe('defineAgent', () => {
   ])('rejects %s', (_name, patch, issue) => {
     expect(issuesOf(() => defineAgent({ ...valid, ...patch })).issues).toContain(issue)
   })
+
+  const TEMPERATURE = 'model.settings.temperature 必须是 0 到 2 之间的数'
+  const TOP_P = 'model.settings.topP 必须大于 0、不超过 1'
+  it.each<[string, { temperature?: number; topP?: number }, string]>([
+    ['a temperature below 0', { temperature: -0.1 }, TEMPERATURE],
+    ['a temperature above 2', { temperature: 2.1 }, TEMPERATURE],
+    ['a temperature that is not a number', { temperature: Number.NaN }, TEMPERATURE],
+    ['a topP of 0', { topP: 0 }, TOP_P],
+    ['a topP above 1', { topP: 1.5 }, TOP_P],
+  ])('AC-004 rejects %s', (_name, settings, issue) => {
+    const issues = issuesOf(() => defineAgent({ ...valid, model: { settings } })).issues
+    expect(issues).toEqual([issue])
+  })
+
+  it('AC-004 accepts the boundary sampling settings and freezes them', () => {
+    for (const settings of [{ temperature: 0, topP: 1 }, { temperature: 2 }]) {
+      const agent = defineAgent({ ...valid, model: { settings } })
+      expect(agent.model?.settings).toEqual(settings)
+      expect(Object.isFrozen(agent.model?.settings)).toBe(true)
+    }
+  })
 })
 
 describe('defineTask', () => {

@@ -16,6 +16,9 @@ const ctx = (signal = new AbortController().signal): ToolCtx => ({
     throw new Error('no spawn')
   },
   progress: () => {},
+  callModel: async () => {
+    throw new Error('no model')
+  },
 })
 
 describe('fakeTool', () => {
@@ -56,7 +59,11 @@ describe('fakeTool', () => {
     expect(tool.safety?.risk).toBe('high')
     expect(tool.safety?.access?.({ path: '/a' })).toEqual({ write: ['/a'] })
     expect(tool.semantics).toEqual({ intent: { kind: 'complete', code: 'finish' } })
-    expect(fakeTool({ name: 'bare' }).execution).toBeUndefined()
+  })
+
+  it('AC-002 writes the side_effect default out when no effect is given', () => {
+    expect(fakeTool({ name: 'bare' }).execution).toEqual({ effect: 'side_effect' })
+    expect(fakeTool({ name: 'read', effect: 'none' }).execution).toEqual({ effect: 'none' })
   })
 
   it('waits on the clock and stops when aborted', async () => {

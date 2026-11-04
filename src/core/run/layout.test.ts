@@ -24,6 +24,15 @@ const texts = (messages: ModelMessage[]) =>
   )
 
 describe('layout', () => {
+  it('AC-003 copies the sampling settings into the model input only when given', () => {
+    expect(layout(parts({ temperature: 0.2, topP: 0.9 }))).toMatchObject({
+      temperature: 0.2,
+      topP: 0.9,
+    })
+    const plain = layout(parts())
+    expect('temperature' in plain || 'topP' in plain).toBe(false)
+  })
+
   it('AC-003 orders the blocks and places breakpoints after capabilities and the transcript', () => {
     const input = layout(parts())
     expect(texts(input.messages)).toEqual([

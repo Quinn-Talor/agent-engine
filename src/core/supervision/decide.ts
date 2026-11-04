@@ -128,11 +128,18 @@ export function decide(
     return stopVerdict('content_filter', '模型输出被内容过滤', ['guard:content_filter'])
   }
 
-  // 来源顺序：违规 → 意图 → 候选 → 各守卫（调用方按任务、执行环境、能力、引擎、预算排好）。
+  // 来源顺序：违规 → 待审批 → 意图 → 候选 → 各守卫（调用方按任务、执行环境、能力、引擎、预算排好）。
   const sourced: SourcedOpinion[] = []
   const violated = obs.interventions.violated[0]
   if (violated)
     sourced.push({ source: 'guard:violation', opinion: { finalize: { code: violated.code } } })
+  // 审批稍后答复：这一轮到此为止，等委托人答复（设计 §9.10）。
+  if (obs.toolCalls.some((c) => c.errorCode === 'APPROVAL_PENDING')) {
+    sourced.push({
+      source: 'guard:approval',
+      opinion: { awaitInput: { code: 'approval_pending' } },
+    })
+  }
   const intent = intentOpinion(obs)
   if (intent) sourced.push(intent)
   if (obs.isFinalCandidate && obs.intent?.kind !== 'complete') {

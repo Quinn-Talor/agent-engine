@@ -36,6 +36,7 @@ const runStarted = (
   model: 'fake:model',
   contextLimit: 10_000,
   outputReserve: 0,
+  modelFingerprint: 'model-fp',
   queuedMs: 0,
   rootRunId: 'r1',
   schemaVersion: SCHEMA_VERSION,
@@ -281,6 +282,22 @@ describe('sqliteArchive', () => {
       expect(() => sqliteArchive({ file })).toThrow(`表结构版本 ${version} 与本版本的 3 不一致`)
     },
   )
+
+  it('AC-023 reads an older summary without the tools usage as zero tool usage', async () => {
+    const file = fileOf()
+    const store = sqliteArchive({ file })
+    await store.append('r1', run('r1', 1000, 'env'))
+    store.close()
+    const db = new Database(file)
+    const row = db.prepare('SELECT usage_json FROM runs WHERE run_id = ?').get('r1') as {
+      usage_json: string
+    }
+    const { tools: _dropped, ...older } = JSON.parse(row.usage_json) as Record<string, unknown>
+    db.prepare('UPDATE runs SET usage_json = ? WHERE run_id = ?').run(JSON.stringify(older), 'r1')
+    db.close()
+    const [summary] = await sqliteArchive({ file }).query({})
+    expect(summary!.usage.tools).toEqual(usage())
+  })
 
   it('AC-005 updates the summary as the run progresses', async () => {
     const file = fileOf()

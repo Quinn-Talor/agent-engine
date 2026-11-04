@@ -242,6 +242,28 @@ describe('modelHub', () => {
     expect(hub.defaultModel).toBe('fake:m')
   })
 
+  it('AC-006 forwards the port settings on every access', () => {
+    let current: unknown = { vendor: 'openai' }
+    const port: ModelPort = {
+      ref: 'fake:m',
+      capabilities: caps,
+      get settings() {
+        return current
+      },
+      call: async () => {
+        throw new Error('not called')
+      },
+    }
+    const hub = modelHub({
+      providers: [{ id: 'fake', resolve: (r: string) => (r === 'fake:m' ? port : undefined) }],
+      clock: new FakeClock(),
+    })
+    const wrapped = hub.resolve('fake:m')!
+    expect(wrapped.settings).toEqual({ vendor: 'openai' })
+    current = { vendor: 'anthropic' }
+    expect(wrapped.settings).toEqual({ vendor: 'anthropic' })
+  })
+
   it('reads the capabilities from the provider on every access, not once when resolving', () => {
     let current: ModelCapabilities = caps
     const port: ModelPort = {

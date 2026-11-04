@@ -21,6 +21,7 @@ import { createAdmission } from '../../services/admission.js'
 import { checkInvariants } from '../../core/log/invariants.js'
 import { strictReplay } from '../../core/log/replay.js'
 import { sideEffects } from '../../core/log/projections.js'
+import { modelFingerprint } from '../../core/definition/fingerprint.js'
 import { memoryArchive } from '../../services/memory-archive.js'
 import { FakeClock } from '../../testing/fake-clock.js'
 import { fakeModel, type FakeModel, type FakeReply } from '../../testing/fake-model.js'
@@ -155,7 +156,7 @@ describe('startRun', () => {
       outputReserve: 8192,
       queuedMs: 0,
       rootRunId: run.runId,
-      schemaVersion: 1,
+      schemaVersion: 2,
     })
     const late: RunEvent[] = []
     run.subscribe({ onEvent: (e) => void late.push(e) }, { fromSeq: 7 })
@@ -1334,5 +1335,61 @@ describe('startRun ending', () => {
       e.t === 'steer_received' ? [e.text] : [],
     )
     expect(steers).toEqual(['first', 'second'])
+  })
+})
+
+describe('sampling settings and model configuration', () => {
+  it('AC-003 sends the agent sampling settings on main and fallback calls, not on side calls', async () => {
+    const probe: Guard = {
+      id: 'probe',
+      version: '1',
+      start: (_run, ctx) => ({
+        check: async (facts) => {
+          if (facts.step !== 1) return { end: { as: 'finalize', code: 'stall' } }
+          await ctx.callModel({
+            purpose: 'supervision:probe',
+            messages: [{ role: 'user', content: '体检' }],
+          })
+          return { warn: { problem: '没有进展' } }
+        },
+      }),
+    }
+    const h = harness({
+      replies: [
+        lookup('l1'),
+        { text: '没事' },
+        lookup('l2'),
+        { text: '写到一半', finishReason: 'length' },
+        { text: '最小视图的总结' },
+      ],
+    })
+    const agent = agentOf({
+      capabilities: [toolsCap(fakeTool({ name: 'lookup', effect: 'none' }))],
+      model: { settings: { temperature: 0.2, topP: 0.9 } },
+    })
+    const { run } = h.start(agent, taskOf({ guards: [probe] }))
+    expect(await run.result).toMatchObject({ status: 'finalized', text: '最小视图的总结' })
+    const events = await h.read(run.runId)
+    expect(events.find((e) => e.t === 'fallback_generated')).toMatchObject({ degradation: 1 })
+    const inputs = h.model.inputs
+    expect(inputs).toHaveLength(5)
+    for (const i of [0, 2, 3, 4]) expect(inputs[i]).toMatchObject({ temperature: 0.2, topP: 0.9 })
+    expect('temperature' in inputs[1]! || 'topP' in inputs[1]!).toBe(false)
+  })
+
+  it('AC-006 records the fingerprint of the port settings in run_started', async () => {
+    const fingerprintOf = async (settings: unknown) => {
+      const h = harness({ replies: [{ text: '好' }] })
+      if (settings !== undefined) Object.assign(h.model.port, { settings })
+      const { run } = h.start()
+      await run.result
+      const started = (await h.read(run.runId)).find((e) => e.t === 'run_started')
+      return started?.t === 'run_started' ? started.modelFingerprint : undefined
+    }
+    expect(await fingerprintOf(undefined)).toBe(modelFingerprint(undefined))
+    expect(await fingerprintOf({ vendor: 'openai' })).toBe(modelFingerprint({ vendor: 'openai' }))
+    expect(await fingerprintOf({ vendor: 'openai' })).not.toBe(
+      await fingerprintOf({ vendor: 'openai', providerOptions: { openai: { user: 'u' } } }),
+    )
   })
 })

@@ -3,8 +3,8 @@
 
 import type { Clock, TaskScope } from '../../contracts/common.js'
 import { toolError, type ToolErrorEnvelope } from '../../contracts/errors.js'
-import type { BlobRef, RunEventBody } from '../../contracts/events.js'
-import type { NormalizedUsage } from '../../contracts/model.js'
+import type { BlobRef, RunEventBody, ToolResultImage } from '../../contracts/events.js'
+import type { NormalizedUsage, SideModelRequest, SideModelResponse } from '../../contracts/model.js'
 import type { Notice } from '../../contracts/run.js'
 import type { ToolCallView, ToolCtx, ToolEffect } from '../../contracts/tool.js'
 import { matchBlock } from '../../core/supervision/facts.js'
@@ -36,9 +36,17 @@ export interface ActDeps {
   scope: TaskScope
   task: ToolCtx['task']
   spawn: ToolCtx['spawn']
+  /** 工具经引擎调用模型：以 `tool:<工具名>` 的名义记日志，`signal` 是这次调用的信号。 */
+  callModel(
+    toolName: string,
+    req: SideModelRequest,
+    signal: AbortSignal,
+  ): Promise<SideModelResponse | undefined>
   notify(notice: Notice): void
   redact(text: string): string
   putBlob(data: string): Promise<BlobRef>
+  /** 图片的 base64 直接写进档案，不脱敏。 */
+  putMedia(base64: string): Promise<BlobRef>
 }
 
 /** 并发上限：FIFO 排队。 */
@@ -119,6 +127,8 @@ export async function act(
     const childRunIds: string[] = []
     let childUsage: NormalizedUsage | undefined
     let childCost = 0
+    /** 审批环节或这次调用发起的子运行给出了待审批：只有这两处能让本步判定为等待输入。 */
+    let approvalPending = false
 
     const ctx: ToolCtx = {
       runId: deps.runId,
@@ -133,12 +143,16 @@ export async function act(
         childRunIds.push(result.runId)
         childUsage = addUsage(childUsage ?? emptyUsage(), { input, output, cacheRead, cacheWrite })
         childCost += result.cost ?? 0
+        if (result.status === 'awaiting_input' && result.code === 'approval_pending') {
+          approvalPending = true
+        }
         return result
       },
       progress: (note) => deps.notify({ t: 'tool_progress', callId: call.id, note }),
+      callModel: (req) => deps.callModel(call.name, req, signal),
     }
 
-    const outcome = await (async (): Promise<ExecOutcome> => {
+    const executed = await (async (): Promise<ExecOutcome> => {
       if (signal.aborted) return aborted()
       const found = lookupTool(call.name, deps.toolset, deps.visible)
       if ('error' in found) return found
@@ -178,11 +192,18 @@ export async function act(
       }
       const permission = await checkPermission(view, { ...deps.permissions, signal })
       events.push(...permission.events)
-      if (!permission.allowed) return { error: permission.error }
+      if (!permission.allowed) {
+        if (permission.error.code === 'APPROVAL_PENDING') approvalPending = true
+        return { error: permission.error }
+      }
       if (signal.aborted) return aborted()
       const release = await gate.enter(tool.def.execution?.exclusive === true)
       try {
-        return await executeTool(tool, validated.value, ctx, { clock, signal })
+        return await executeTool(tool, validated.value, ctx, {
+          clock,
+          signal,
+          callModel: (req, callSignal) => deps.callModel(call.name, req, callSignal),
+        })
       } finally {
         release()
       }
@@ -190,6 +211,16 @@ export async function act(
       // 流水线里工具之外的出错（如 safety.access 抛错）同样包成信封（I5）。
       (error: unknown): ExecOutcome => ({ error: toolError('TOOL_EXCEPTION', messageOf(error)) }),
     )
+    // APPROVAL_PENDING 是引擎保留的错误码：它让这一轮以等待输入结束，工具自己不能给出（BR-005）。
+    const outcome: ExecOutcome =
+      'error' in executed && executed.error.code === 'APPROVAL_PENDING' && !approvalPending
+        ? {
+            error: toolError(
+              'TOOL_EXCEPTION',
+              '工具返回了引擎保留的错误码 APPROVAL_PENDING：只有审批环节和等审批的子运行能给出它',
+            ),
+          }
+        : executed
 
     const effect: ToolEffect = tool?.effect ?? 'none'
     // 有副作用的调用结果未知：提示模型先核实，不要用相同输入重试（I15）。
@@ -200,10 +231,15 @@ export async function act(
     let out = normalizeOutput(shownOutcome, maxOutputChars, deps.redact)
     let shown: BlobRef
     let raw: BlobRef | undefined
+    let images: ToolResultImage[] = []
     try {
+      for (const image of out.images ?? []) {
+        images.push({ blob: await deps.putMedia(image.data), mediaType: image.mediaType })
+      }
       shown = await deps.putBlob(out.shown)
       raw = out.raw === undefined ? undefined : await deps.putBlob(out.raw)
     } catch (error) {
+      images = []
       // 结果写不进 blob：改为错误信封，保证每个调用都有结果（I2、I5）。执行成功的副作用
       // 已经发生，只是结果丢了。
       const lost = effect !== 'none' && 'value' in outcome
@@ -237,6 +273,7 @@ export async function act(
       ...(childRunIds.length > 0 ? { childRunId: childRunIds.at(-1)! } : {}),
       ...(childRunIds.length > 1 ? { childRunIds } : {}),
       ...(childUsage ? { usage: childUsage, cost: childCost } : {}),
+      ...(images.length > 0 ? { images } : {}),
     })
     return events
   }

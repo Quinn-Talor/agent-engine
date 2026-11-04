@@ -3,7 +3,8 @@
 
 import type { Clock } from '../../contracts/common.js'
 import { isToolError, toolError, type ToolErrorEnvelope } from '../../contracts/errors.js'
-import type { ToolCtx } from '../../contracts/tool.js'
+import type { SideModelRequest, SideModelResponse } from '../../contracts/model.js'
+import { isToolContent, type ToolContent, type ToolCtx } from '../../contracts/tool.js'
 import type { PreparedTool } from './tools.js'
 
 const DEFAULT_TIMEOUT_MS = 30_000
@@ -28,7 +29,15 @@ export async function executeTool(
   tool: PreparedTool,
   input: unknown,
   ctx: ToolCtx,
-  opts: { clock: Clock; signal: AbortSignal },
+  opts: {
+    clock: Clock
+    signal: AbortSignal
+    /** 工具经引擎调用模型；`signal` 是这次调用的信号（工具超时或取消时触发）。 */
+    callModel?: (
+      req: SideModelRequest,
+      signal: AbortSignal,
+    ) => Promise<SideModelResponse | undefined>
+  },
 ): Promise<ExecOutcome> {
   const { def } = tool
   let available: boolean
@@ -80,7 +89,13 @@ export async function executeTool(
         signal: o?.signal ? AbortSignal.any([o.signal, signal]) : signal,
       })
     Promise.resolve()
-      .then(() => def.execute(input, { ...ctx, signal, spawn }))
+      .then(() => {
+        // 工具里的模型调用同样跟随本次调用的信号。
+        const callModel: ToolCtx['callModel'] = opts.callModel
+          ? (req) => opts.callModel!(req, signal)
+          : ctx.callModel
+        return def.execute(input, { ...ctx, signal, spawn, callModel })
+      })
       .then(
         (value) => finish(isToolError(value) ? { error: declared(value) } : { value }),
         // 抛出的信封是工具明确报告的失败；其他异常不知道执行到了哪里。
@@ -101,6 +116,55 @@ export interface NormalizedOutput {
   raw?: string
   isError: boolean
   errorCode?: string
+  /** 内容块结果里的图片（base64）。 */
+  images?: ToolImage[]
+}
+
+export interface ToolImage {
+  data: string
+  mediaType: string
+}
+
+/** 单张图片的大小上限（字节）与每次结果的张数上限。 */
+const MAX_IMAGE_BYTES = 5_242_880
+const MAX_IMAGES = 8
+const BASE64 = /^[A-Za-z0-9+/=\s]+$/
+
+function bytesToBase64(bytes: Uint8Array): string {
+  let binary = ''
+  // 分段拼接，避免大图一次展开参数过多。
+  for (let i = 0; i < bytes.length; i += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000))
+  }
+  return btoa(binary)
+}
+
+/** 内容块结果拆成正文与图片；有不合格的块时整个结果按工具异常处理。 */
+function contentOf(
+  content: ToolContent,
+): { text: string; images: ToolImage[] } | { error: ToolErrorEnvelope } {
+  const texts: string[] = []
+  const images: ToolImage[] = []
+  let overflow = 0
+  for (const [i, part] of content.parts.entries()) {
+    let image: { data: string; bytes: number } | undefined
+    if (part.type === 'text' && typeof part.text === 'string') {
+      texts.push(part.text)
+      continue
+    } else if (part.type === 'image' && part.image instanceof Uint8Array) {
+      image = { data: bytesToBase64(part.image), bytes: part.image.length }
+    } else if (part.type === 'image' && typeof part.image === 'string' && BASE64.test(part.image)) {
+      const data = part.image.replace(/\s/g, '')
+      image = { data, bytes: Math.floor((data.length * 3) / 4) }
+    } else {
+      return { error: toolError('TOOL_EXCEPTION', `工具返回的内容块不合格：第 ${i + 1} 块`) }
+    }
+    if (image.bytes > MAX_IMAGE_BYTES) texts.push(`[图片过大，未展示：${image.bytes} 字节]`)
+    else if (images.length >= MAX_IMAGES) overflow += 1
+    else images.push({ data: image.data, mediaType: part.mediaType ?? 'image' })
+  }
+  if (overflow > 0) texts.push(`[其余 ${overflow} 张图片未展示：每次最多 ${MAX_IMAGES} 张]`)
+  return { text: texts.join('\n'), images }
 }
 
 function bodyOf(outcome: ExecOutcome): string {
@@ -126,8 +190,18 @@ export function normalizeOutput(
   redact: (text: string) => string = (text) => text,
 ): NormalizedOutput {
   let text: string
+  let images: ToolImage[] = []
   try {
-    text = bodyOf(outcome)
+    if ('value' in outcome && isToolContent(outcome.value)) {
+      const content = contentOf(outcome.value)
+      if ('error' in content) {
+        outcome = content
+        text = bodyOf(outcome)
+      } else {
+        text = content.text
+        images = content.images
+      }
+    } else text = bodyOf(outcome)
   } catch (error) {
     // BigInt、循环引用、函数等无法序列化的结果按工具异常处理（I5）。
     outcome = { error: toolError('TOOL_EXCEPTION', `工具结果无法序列化：${messageOf(error)}`) }
@@ -148,6 +222,7 @@ export function normalizeOutput(
   const safe = body.replaceAll('</tool_output>', '<\\/tool_output>')
   const out: NormalizedOutput = { shown: `<tool_output>\n${safe}\n</tool_output>`, isError: false }
   if (raw !== undefined) out.raw = raw
+  if (images.length > 0) out.images = images
   if ('error' in outcome) {
     out.isError = true
     out.errorCode = outcome.error.code

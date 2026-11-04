@@ -225,6 +225,7 @@ describe('regressionReplay', () => {
             main: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
             memory: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
             supervision: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+            tools: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
             children: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
           },
           steps: 0,

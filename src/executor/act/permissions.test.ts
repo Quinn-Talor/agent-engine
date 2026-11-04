@@ -119,6 +119,35 @@ describe('checkPermission', () => {
     })
   })
 
+  it('AC-011 reports a deferred answer as APPROVAL_PENDING and records it', async () => {
+    const result = await checkPermission(
+      call,
+      deps({
+        rules: [rule('a', ask('发律师函', 'high'))],
+        approver: approver({ defer: '等律师复核' }),
+      }),
+    )
+    expect(result).toMatchObject({ allowed: false, error: { code: 'APPROVAL_PENDING' } })
+    expect(result.allowed || result.error.message).toContain('等律师复核')
+    expect(result.allowed || result.error.hint).toContain('委托人答复后会接着做')
+    expect(result.events.at(-1)).toEqual({
+      t: 'approval_answered',
+      callId: 'c1',
+      approved: false,
+      deferred: true,
+      waitedMs: 0,
+    })
+  })
+
+  it('AC-011 does not take an empty deferral as one', async () => {
+    const result = await checkPermission(
+      call,
+      deps({ rules: [rule('a', ask('写文件', 'low'))], approver: approver({ defer: ' ' }) }),
+    )
+    expect(result).toMatchObject({ allowed: false, error: { code: 'USER_DENIED' } })
+    expect(result.events.at(-1)).not.toHaveProperty('deferred')
+  })
+
   it('reports a user rejection as USER_DENIED', async () => {
     const result = await checkPermission(
       call,

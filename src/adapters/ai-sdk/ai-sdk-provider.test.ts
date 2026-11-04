@@ -324,6 +324,52 @@ describe('aiSdkProvider', () => {
     })
   })
 
+  it('AC-007 sends the sampling settings of the input and nothing when they are absent', async () => {
+    const { port, model } = setup([[...text('x'), finish()]])
+    await run(port, input({ temperature: 0.3, topP: 0.8 }))
+    expect(model.doStreamCalls[0]).toMatchObject({ temperature: 0.3, topP: 0.8 })
+    await run(port)
+    expect(model.doStreamCalls[1]!.temperature).toBeUndefined()
+    expect(model.doStreamCalls[1]!.topP).toBeUndefined()
+  })
+
+  it('AC-006 declares its settings with header names only', () => {
+    const settingsOf = (config: Partial<AiSdkModelConfig>) => setup([[]], config).port.settings
+    const configured = settingsOf({
+      vendor: 'openai',
+      reasoning: 'high',
+      callSettings: {
+        providerOptions: { openai: { user: 'u' } },
+        headers: { 'x-b': '1', 'x-a': '2' },
+      },
+    })
+    expect(configured).toEqual({
+      vendor: 'openai',
+      reasoning: 'high',
+      dropReasoningHistory: false,
+      providerOptions: { openai: { user: 'u' } },
+      sdkReasoning: null,
+      headers: ['x-a', 'x-b'],
+    })
+    const rotated = settingsOf({
+      vendor: 'openai',
+      reasoning: 'high',
+      callSettings: {
+        providerOptions: { openai: { user: 'u' } },
+        headers: { 'x-b': '9', 'x-a': '8' },
+      },
+    })
+    expect(rotated).toEqual(configured)
+    expect(settingsOf({})).toEqual({
+      vendor: 'other',
+      reasoning: null,
+      dropReasoningHistory: false,
+      providerOptions: null,
+      sdkReasoning: null,
+      headers: [],
+    })
+  })
+
   it('F20 AC-002 sends the app headers', async () => {
     const { port, model } = setup([[...text('x'), finish()]], {
       callSettings: { headers: { 'x-a': '1' } },

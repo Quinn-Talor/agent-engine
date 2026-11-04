@@ -14,7 +14,7 @@ import {
   toolFinished,
   type EventBody,
 } from '../log/events.fixture.js'
-import { apply, initial, nextStage, type RunState } from './state.js'
+import { type RunState, apply, bucketOf, initial, nextStage } from './state.js'
 
 const fold = (bodies: EventBody[], from: RunState = initial({ runId: 'r1' })): RunState =>
   sequence(bodies).reduce(apply, from)
@@ -497,5 +497,16 @@ describe('state machine', () => {
       modelResponded(1, { usage: { input: 200, output: 5, cacheRead: 700, cacheWrite: 100 } }),
     ])
     expect(state.calibration).toBeCloseTo(1)
+  })
+})
+
+describe('usage buckets', () => {
+  it.each([
+    ['tool:x/y', 'tools'],
+    ['memory:m/c', 'memory'],
+    ['deliver:f', 'main'],
+    ['engine:a/b', 'supervision'],
+  ] as const)('AC-010 puts %s into %s', (source, bucket) => {
+    expect(bucketOf(source)).toBe(bucket)
   })
 })

@@ -477,3 +477,37 @@ describe('ledger', () => {
     })
   })
 })
+
+describe('images in tool results', () => {
+  it('AC-019 lists the image blobs for carry and carries them with the result', () => {
+    const img = 'sha256:image0000000000000000000000000000000000000000000000000000000000'
+    const turn = turnOf([
+      runStarted(),
+      stepStarted(1),
+      contextBuilt(1),
+      modelResponded(1, { toolCalls: [call('c1')] }),
+      toolFinished('c1', { images: [{ blob: img, mediaType: 'image/png' }] }),
+      stepStarted(2),
+      contextBuilt(2),
+      modelResponded(2, { text: '答复' }),
+      runEnded(),
+    ])
+    expect(blobsForCarry(turn.events)).toContain(img)
+    const blobs = new Map(turn.blobs)
+    blobs.set(img, 'AQID')
+    const result = carry({ ...turn, blobs }).messages[2]
+    expect(result).toEqual({
+      role: 'tool',
+      content: [
+        {
+          type: 'tool-result',
+          toolCallId: 'c1',
+          toolName: 'search',
+          output: out('c1'),
+          isError: false,
+          images: [{ type: 'image', image: 'AQID', mediaType: 'image/png' }],
+        },
+      ],
+    })
+  })
+})

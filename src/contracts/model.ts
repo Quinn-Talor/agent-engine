@@ -41,6 +41,17 @@ export interface ModelInput {
   /** 缓存断点：消息下标，断点打在该消息末尾（设计 §8.1 缓存断点）。 */
   cacheBreakpoints?: number[]
   maxOutputTokens?: number
+  /** Agent 的采样参数（`AgentDef.model.settings`）：只用于主模型调用与兜底调用。 */
+  temperature?: number
+  topP?: number
+}
+
+/** Agent 给主模型调用定的采样参数（设计 §1.4）；推理档位等厂商参数在模型配置里。 */
+export interface ModelSettings {
+  /** 0 到 2。 */
+  temperature?: number
+  /** 大于 0、不超过 1。 */
+  topP?: number
 }
 
 export type Delta = { type: 'text'; text: string } | { type: 'reasoning'; text: string }
@@ -64,6 +75,8 @@ export interface RunUsage extends NormalizedUsage {
   main: NormalizedUsage
   memory: NormalizedUsage
   supervision: NormalizedUsage
+  /** 工具经 `ToolCtx.callModel` 的模型调用。 */
+  tools: NormalizedUsage
   children: NormalizedUsage
 }
 
@@ -94,6 +107,11 @@ export interface ModelPort {
   ref: ModelRef
   /** 可以随应用配置变化（例如用 getter 读当前配置）；引擎在每次运行开始时读取，运行中不变。 */
   capabilities: ModelCapabilities
+  /**
+   * 端口每次调用都带上的配置（可序列化），引擎只用它算模型配置指纹（`run_started.modelFingerprint`）；
+   * 可以用 getter 读当前配置。凭据不要放进来。
+   */
+  readonly settings?: unknown
   call(
     input: ModelInput,
     opts: { signal: AbortSignal; onDelta: (d: Delta) => void },

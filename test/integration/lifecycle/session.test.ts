@@ -9,6 +9,7 @@ import {
   memoryArchive,
   modelHub,
   subagent,
+  toolContent,
   tools,
   type ArchiveStore,
   type ModelInput,
@@ -229,6 +230,46 @@ describe('sessions end to end', () => {
     expect(started?.t === 'run_started' && started.session?.window.ledger).toEqual([
       { turn: 1, tool: 'send', input: '{"to":"星河科技"}', status: 'executed' },
     ])
+    expect(await sessionLogIssues(archive, 's')).toEqual([])
+  })
+
+  it('AC-019 carries the image of a tool result into the next turn', async () => {
+    const png = new Uint8Array([137, 80, 78, 71])
+    const shot = fakeTool({
+      name: 'screenshot',
+      effect: 'none',
+      result: toolContent([
+        { type: 'text', text: '页面截图' },
+        { type: 'image', image: png, mediaType: 'image/png' },
+      ]),
+    })
+    const model = fakeModel({
+      model: 'main',
+      replies: [
+        { toolCalls: [{ id: 'p1', name: 'screenshot', input: {} }] },
+        { text: '页面正常' },
+        { text: '和上次一样' },
+      ],
+      capabilities: { contextLimit: 100_000, maxOutputTokens: 1_000, vision: true },
+    })
+    const archive = memoryArchive()
+    const engine = createEngine({
+      services: {
+        models: modelHub({ providers: [model], default: model.ref }),
+        archive,
+        logger: quiet,
+      },
+    })
+    const env = engine.environment({ name: 'chat', principal: { reachable: true } })
+    const agent = defineAgent({ id: 'helper', instructions, capabilities: [tools([shot])] })
+    await env.start(agent, ask('截个图'), { session: 's' }).result
+    const next = env.start(agent, ask('再看看'), { session: 's' })
+    expect(await next.result).toMatchObject({ status: 'completed' })
+    const base64 = Buffer.from(png).toString('base64')
+    const carried = model.inputs[2]!.messages.flatMap((m) =>
+      m.role === 'tool' ? m.content.flatMap((r) => r.images ?? []) : [],
+    )
+    expect(carried).toEqual([{ type: 'image', image: base64, mediaType: 'image/png' }])
     expect(await sessionLogIssues(archive, 's')).toEqual([])
   })
 })

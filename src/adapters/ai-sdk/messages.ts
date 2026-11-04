@@ -50,9 +50,35 @@ function reasoningParts(text: string, providerData: unknown): SdkAssistantPart[]
   ]
 }
 
+type ToolResult = Extract<ModelMessage, { role: 'tool' }>['content'][number]
+
+/** 工具结果：带图片时，支持视觉的模型收到文本加图片，不支持的收到文本加一行说明。 */
+function toolOutput(r: ToolResult, vision: boolean) {
+  if (r.isError) return { type: 'error-text' as const, value: r.output }
+  const images = r.images ?? []
+  if (images.length === 0) return { type: 'text' as const, value: r.output }
+  if (!vision) {
+    return {
+      type: 'text' as const,
+      value: `${r.output}\n[图片 ${images.length} 张：模型不支持视觉，未展示]`,
+    }
+  }
+  return {
+    type: 'content' as const,
+    value: [
+      ...(r.output ? [{ type: 'text' as const, text: r.output }] : []),
+      ...images.map((i) => ({
+        type: 'file' as const,
+        mediaType: i.mediaType ?? 'image',
+        data: { type: 'data' as const, data: i.image },
+      })),
+    ],
+  }
+}
+
 function convert(
   m: ModelMessage,
-  opts: { rewriteSystem: boolean; dropReasoning: boolean },
+  opts: { rewriteSystem: boolean; dropReasoning: boolean; vision: boolean },
 ): SdkModelMessage {
   switch (m.role) {
     case 'system':
@@ -108,9 +134,7 @@ function convert(
           type: 'tool-result' as const,
           toolCallId: r.toolCallId,
           toolName: r.toolName,
-          output: r.isError
-            ? { type: 'error-text' as const, value: r.output }
-            : { type: 'text' as const, value: r.output },
+          output: toolOutput(r, opts.vision),
         })),
       }
   }
@@ -123,6 +147,8 @@ export function toSdkMessages(
     dropReasoning: boolean
     cacheBreakpoints?: number[]
     anthropic: boolean
+    /** 模型支持视觉：工具结果里的图片作为内容发出；不支持时换成一行说明。 */
+    vision: boolean
   },
 ): SdkModelMessage[] {
   const breakpoints = new Set(opts.anthropic ? (opts.cacheBreakpoints ?? []) : [])
@@ -131,6 +157,7 @@ export function toSdkMessages(
     const converted = convert(m, {
       rewriteSystem: m.role === 'system' && !opts.systemAfterUser && seenUser,
       dropReasoning: opts.dropReasoning,
+      vision: opts.vision,
     })
     if (m.role === 'user') seenUser = true
     return breakpoints.has(i) ? { ...converted, providerOptions: EPHEMERAL } : converted

@@ -84,6 +84,6 @@ describe('contracts accept the design examples', () => {
       'completed' | 'awaiting_input' | 'finalized' | 'stopped' | 'failed' | 'aborted'
     >()
     expectTypeOf<Extract<RunEvent, { t: 'step_started' }>>().toHaveProperty('step')
-    expect(SCHEMA_VERSION).toBe(1)
+    expect(SCHEMA_VERSION).toBe(2)
   })
 })

@@ -47,16 +47,23 @@ const carried = (entry: TranscriptEntry): boolean =>
   entry.origin === 'steer' ||
   (entry.origin === 'hint' && entry.source === 'delivery')
 
-/** carry 需要的 blob：工具结果的展示文本、须知的动态内容（占着记忆的坐标）、压缩摘要。 */
+/** carry 需要的 blob：工具结果的展示文本与图片、须知的动态内容（占着记忆的坐标）、压缩摘要。 */
 export function blobsForCarry(events: readonly RunEvent[]): BlobRef[] {
   const refs = new Set<BlobRef>()
   const state = foldState(events)
   for (const entry of state.transcript) {
-    if (entry.origin === 'tool') for (const r of entry.results) refs.add(r.shown)
-    else if (entry.origin === 'hook') refs.add(entry.content)
+    if (entry.origin === 'tool') {
+      for (const r of entry.results) {
+        refs.add(r.shown)
+        for (const i of r.images ?? []) refs.add(i.blob)
+      }
+    } else if (entry.origin === 'hook') refs.add(entry.content)
   }
   // 一批调用没有全部结束时，已有的结果还不在运行记录里。
-  for (const r of Object.values(state.results)) refs.add(r.shown)
+  for (const r of Object.values(state.results)) {
+    refs.add(r.shown)
+    for (const i of r.images ?? []) refs.add(i.blob)
+  }
   const compaction = lastCompactionEvent(events)
   if (compaction) refs.add(compaction.summary)
   return [...refs]

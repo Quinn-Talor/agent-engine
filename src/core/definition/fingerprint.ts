@@ -59,8 +59,18 @@ export function agentFingerprint(def: AgentDef): string {
     })),
     exposure: def.toolbox?.exposure ? componentIdentity(def.toolbox.exposure) : 'default',
     deliverable: def.deliverable ? deliverableIdentity(def.deliverable) : 'default',
-    model: { prefer: def.model?.prefer ?? null, requires: def.model?.requires ?? null },
+    model: {
+      prefer: def.model?.prefer ?? null,
+      requires: def.model?.requires ?? null,
+      // 没给采样参数时不写这个键：已有 Agent 的指纹不变。
+      ...(def.model?.settings !== undefined ? { settings: def.model.settings } : {}),
+    },
   })
+}
+
+/** 模型配置指纹：端口声明的调用参数；端口没有声明时与 `null` 相同。 */
+export function modelFingerprint(settings: unknown): string {
+  return hashOf(settings ?? null)
 }
 
 /** 任务指纹：做的是什么；不含易变信息与归属。 */

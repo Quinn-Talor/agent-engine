@@ -190,6 +190,17 @@ export function defineAgent(def: AgentDef): Agent {
   if (minContext !== undefined && !isInteger(minContext, 1)) {
     issues.push('model.requires.minContext 必须是正整数')
   }
+  const temperature = def.model?.settings?.temperature
+  if (
+    temperature !== undefined &&
+    !(Number.isFinite(temperature) && temperature >= 0 && temperature <= 2)
+  ) {
+    issues.push('model.settings.temperature 必须是 0 到 2 之间的数')
+  }
+  const topP = def.model?.settings?.topP
+  if (topP !== undefined && !(Number.isFinite(topP) && topP > 0 && topP <= 1)) {
+    issues.push('model.settings.topP 必须大于 0、不超过 1')
+  }
 
   let fingerprint = ''
   if (issues.length === 0) {

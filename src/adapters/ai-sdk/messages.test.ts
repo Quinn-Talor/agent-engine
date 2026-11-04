@@ -50,7 +50,7 @@ const view: ModelMessage[] = [
     ],
   },
 ]
-const plain = { systemAfterUser: true, dropReasoning: false, anthropic: false }
+const plain = { systemAfterUser: true, dropReasoning: false, anthropic: false, vision: false }
 
 describe('toSdkMessages', () => {
   it('AC-011 converts every part and replays reasoning with its signature', () => {
@@ -174,5 +174,44 @@ describe('cleanLeakedToolMarkup', () => {
     )
     expect(cleanLeakedToolMarkup('<|tool_call_begin|>b<|tool_call_end|> 继续')).toBe('继续')
     expect(cleanLeakedToolMarkup('普通文本')).toBe('普通文本')
+  })
+})
+
+describe('tool results with images', () => {
+  const withImage: ModelMessage[] = [
+    {
+      role: 'tool',
+      content: [
+        {
+          type: 'tool-result',
+          toolCallId: 'c1',
+          toolName: 'screenshot',
+          output: '截图如下',
+          isError: false,
+          images: [{ type: 'image', image: 'AQID', mediaType: 'image/png' }],
+        },
+      ],
+    },
+  ]
+  const outputOf = (vision: boolean) => {
+    const [message] = toSdkMessages(withImage, { ...plain, vision })
+    return (message as { content: Array<{ output: unknown }> }).content[0]!.output
+  }
+
+  it('AC-017 sends the image as content to a vision model', () => {
+    expect(outputOf(true)).toEqual({
+      type: 'content',
+      value: [
+        { type: 'text', text: '截图如下' },
+        { type: 'file', mediaType: 'image/png', data: { type: 'data', data: 'AQID' } },
+      ],
+    })
+  })
+
+  it('AC-017 tells a model without vision that the image was left out', () => {
+    expect(outputOf(false)).toEqual({
+      type: 'text',
+      value: '截图如下\n[图片 1 张：模型不支持视觉，未展示]',
+    })
   })
 })

@@ -35,6 +35,7 @@ import {
 import type { ModelHub, ModelInput, ModelRef, NormalizedUsage } from '../../contracts/model.js'
 import type { Run, RunResult } from '../../contracts/run.js'
 import type { Task } from '../../contracts/task.js'
+import { modelFingerprint } from '../../core/definition/fingerprint.js'
 import { canonicalJson } from '../../core/definition/hash.js'
 import { estimateMessages, outputReserveOf } from '../../core/run/estimate.js'
 import { CARRY_VERSION, ledgerSegment } from '../../core/session/window.js'
@@ -441,6 +442,7 @@ export function startRun(
         model: a.model,
         contextLimit: a.port.capabilities.contextLimit,
         outputReserve: outputReserveOf(a.port.capabilities),
+        modelFingerprint: modelFingerprint(a.port.settings),
         queuedMs,
         ...(parent ? { parentRunId: parent.runId } : {}),
         rootRunId: lineage.rootRunId,
@@ -499,6 +501,7 @@ export function startRun(
           tail: [],
           tools: [],
           maxOutputTokens: outputReserveOf(a.port.capabilities),
+          ...agent.model?.settings,
         })
       const corpus = async (): Promise<Corpus> => {
         const effects = new Map(
@@ -535,6 +538,7 @@ export function startRun(
         putBlob,
         log,
         outputReserve: outputReserveOf(a.port.capabilities),
+        ...(agent.model?.settings ? { settings: agent.model.settings } : {}),
         ...(claim
           ? {
               session: {
@@ -730,9 +734,12 @@ export function startRun(
           ...(task.context !== undefined ? { context: task.context } : {}),
         },
         spawn,
+        callModel: (name, req, signal) => context.callModelFor(`tool:${name}`, req, signal),
         notify: subscribers.notify,
         redact: keeper.redact,
         putBlob,
+        // 图片是 base64，不经过脱敏（脱敏只针对文本里的凭据）。
+        putMedia: (data) => archive.putBlob(data),
       })
       await children.settle()
       return children.withLate(batch)

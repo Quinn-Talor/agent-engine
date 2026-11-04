@@ -16,7 +16,7 @@ import type { RunResult, RunStatus, RunSummary } from './run.js'
 import type { ToolEffect } from './tool.js'
 
 /** 事件格式版本，写入 `run_started.schemaVersion`。 */
-export const SCHEMA_VERSION = 1
+export const SCHEMA_VERSION = 2
 
 /** blob 引用：`sha256:<64 位十六进制>`。 */
 export type BlobRef = string
@@ -50,6 +50,12 @@ export interface RememberScope {
   pattern?: string
 }
 
+/** 工具结果里的图片：blob 存 base64 文本（不脱敏）。 */
+export interface ToolResultImage {
+  blob: BlobRef
+  mediaType: string
+}
+
 export type RunEvent = { seq: number; at: number } & (
   | {
       t: 'run_started'
@@ -60,6 +66,8 @@ export type RunEvent = { seq: number; at: number } & (
       capabilities: CapabilitySnapshot[]
       unavailable: Array<{ capability: string; reason: string }>
       model: ModelRef
+      /** 模型配置指纹：端口声明的调用参数（`ModelPort.settings`）的哈希，平台改了参数就能看出来。 */
+      modelFingerprint: string
       /** 运行模型的上下文窗口；超限检查与压力只读日志即可得到（F2 §B.4.4）。 */
       contextLimit: number
       /** 给输出留出的 token：输入上限 = 窗口 − 输出预留（I7）。 */
@@ -117,6 +125,8 @@ export type RunEvent = { seq: number; at: number } & (
       callId: string
       approved: boolean
       remember?: RememberScope
+      /** 审批人稍后答复：调用没有执行（`APPROVAL_PENDING`）。 */
+      deferred?: true
       waitedMs: number
     }
   | {
@@ -140,6 +150,8 @@ export type RunEvent = { seq: number; at: number } & (
       /** 子运行的用量与费用，计入父运行（F2 §B.4.4）。 */
       usage?: NormalizedUsage
       cost?: number
+      /** 结果里展示给模型的图片（工具返回 `toolContent`）。 */
+      images?: ToolResultImage[]
     }
   | {
       t: 'external_call'

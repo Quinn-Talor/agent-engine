@@ -56,6 +56,7 @@ describe('error codes', () => {
       'TOOL_INTERRUPTED',
       'OUTPUT_INVALID',
       'INTENT_NOT_ALONE',
+      'APPROVAL_PENDING',
       'SPAWN_DEPTH_EXCEEDED',
       'SPAWN_CYCLE',
       'SPAWN_BUDGET',

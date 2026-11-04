@@ -30,6 +30,7 @@ export const runUsage = (): RunUsage => ({
   main: usage(),
   memory: usage(),
   supervision: usage(),
+  tools: usage(),
   children: usage(),
 })
 
@@ -62,6 +63,7 @@ export const runStarted = (patch: Partial<Of<'run_started'>> = {}): Of<'run_star
   model: 'fake:model',
   contextLimit: 10_000,
   outputReserve: 0,
+  modelFingerprint: 'model-fp',
   queuedMs: 0,
   rootRunId: 'r1',
   schemaVersion: 1,

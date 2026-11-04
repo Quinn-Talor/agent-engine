@@ -135,6 +135,7 @@ function createPort(
         dropReasoning: config.dropReasoningHistory === true,
         ...(input.cacheBreakpoints ? { cacheBreakpoints: input.cacheBreakpoints } : {}),
         anthropic: vendor === 'anthropic',
+        vision: capabilities.vision,
       }),
       ...(input.tools.length > 0
         ? {
@@ -155,6 +156,8 @@ function createPort(
       ...(callSettings.headers ? { headers: callSettings.headers } : {}),
       ...(callSettings.reasoning !== undefined ? { reasoning: callSettings.reasoning } : {}),
       ...(maxOutputTokens !== undefined ? { maxOutputTokens } : {}),
+      ...(input.temperature !== undefined ? { temperature: input.temperature } : {}),
+      ...(input.topP !== undefined ? { topP: input.topP } : {}),
       stopWhen: stepCountIs(1),
       maxRetries: opts.maxRetries,
       abortSignal: signal,
@@ -270,9 +273,20 @@ function createPort(
     }
   }
 
+  // 只用于算模型配置指纹：header 只取名字，值可能是凭据，轮换时不应改变指纹。
+  const settings = {
+    vendor,
+    reasoning: config.reasoning ?? null,
+    dropReasoningHistory: config.dropReasoningHistory === true,
+    providerOptions: callSettings.providerOptions ?? null,
+    sdkReasoning: callSettings.reasoning ?? null,
+    headers: Object.keys(callSettings.headers ?? {}).sort(),
+  }
+
   return {
     ref,
     capabilities,
+    settings,
     async call(input, { signal, onDelta }) {
       const attempts: ModelAttempt[] = []
       let retried = false

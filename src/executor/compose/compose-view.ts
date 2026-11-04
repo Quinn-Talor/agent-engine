@@ -66,8 +66,12 @@ export class BlobCache {
 /** 运行记录渲染为模型消息；待合并的引导作为最后一条 user 消息。 */
 export async function renderTranscript(state: RunState, blobs: BlobCache): Promise<ModelMessage[]> {
   for (const entry of state.transcript) {
-    if (entry.origin === 'tool') for (const r of entry.results) await blobs.get(r.shown)
-    else if (entry.origin === 'hook') await blobs.get(entry.content)
+    if (entry.origin === 'tool') {
+      for (const r of entry.results) {
+        await blobs.get(r.shown)
+        for (const i of r.images ?? []) await blobs.get(i.blob)
+      }
+    } else if (entry.origin === 'hook') await blobs.get(entry.content)
   }
   const messages = transcriptMessages(state.transcript, blobs.snapshot())
   if (state.pendingSteers.length > 0) {

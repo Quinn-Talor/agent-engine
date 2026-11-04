@@ -55,6 +55,15 @@ export function fakeTool(opts: FakeToolOptions): FakeTool {
     description: opts.description ?? `fake tool ${opts.name}`,
     inputSchema: opts.inputSchema ?? z.looseObject({}),
     calls,
+    // 没给 effect 时写出引擎原来的保守值，测试的语义不变。
+    execution: {
+      effect: opts.effect ?? 'side_effect',
+      ...compact({
+        exclusive: opts.exclusive,
+        timeoutMs: opts.timeoutMs,
+        maxOutputChars: opts.maxOutputChars,
+      }),
+    },
     async execute(input, ctx) {
       calls.push({ input, ctx })
       if (opts.delayMs) await wait(clock, opts.delayMs, ctx.signal)
@@ -63,13 +72,6 @@ export function fakeTool(opts: FakeToolOptions): FakeTool {
     },
   }
   if (opts.validate) tool.validate = opts.validate
-  const execution = compact({
-    effect: opts.effect,
-    exclusive: opts.exclusive,
-    timeoutMs: opts.timeoutMs,
-    maxOutputChars: opts.maxOutputChars,
-  })
-  if (execution) tool.execution = execution
   const safety = compact({ risk: opts.risk, access: opts.access })
   if (safety) tool.safety = safety
   const semantics = compact({ intent: opts.intent, repeatable: opts.repeatable })

@@ -45,7 +45,7 @@ export function prepareTool(
     capability,
     schema,
     jsonSchema,
-    effect: def.execution?.effect ?? 'side_effect',
+    effect: def.execution.effect,
     invalidInputCode: opts.invalidInputCode ?? 'INVALID_INPUT',
   }
   if (opts.available) tool.available = opts.available

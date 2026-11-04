@@ -348,3 +348,44 @@ describe('secretKeeper', () => {
     await expect(secretKeeper().vault.resolve({ secret: 'db' })).rejects.toThrow('没有配置凭据库')
   })
 })
+
+describe('model calls from tools', () => {
+  it('AC-008 records a tool model call under the tool source', async () => {
+    const { context } = setup()
+    const response = await context.callModelFor('tool:summarize', {
+      purpose: 'digest',
+      messages: [{ role: 'user', content: '长文' }],
+    })
+    expect(response).toMatchObject({ text: 'summary', usage: usage(7, 3) })
+    expect(context.drain()).toEqual([
+      expect.objectContaining({
+        t: 'external_call',
+        source: 'tool:summarize/digest',
+        kind: 'model',
+        usage: usage(7, 3),
+      }),
+    ])
+  })
+
+  it('AC-009 follows the signal of the tool call and adds no component deadline', async () => {
+    const { context, clock, blobs } = setup({ replies: [{ hang: true }] })
+    const call = new AbortController()
+    const pending = context.callModelFor(
+      'tool:slow',
+      { purpose: 'digest', messages: [] },
+      call.signal,
+    )
+    const settled = pending.then(
+      () => 'resolved',
+      (error: unknown) => (error as Error).name,
+    )
+    // 组件的时限（30 秒减 1 秒）对工具来源不生效：工具自己的超时经信号生效。
+    await clock.tick(60_000)
+    expect(context.drain()).toEqual([])
+    call.abort()
+    expect(await settled).toBe('AbortError')
+    const [event] = context.drain() as Array<Extract<RunEventBody, { t: 'external_call' }>>
+    expect(event).toMatchObject({ source: 'tool:slow/digest', kind: 'model' })
+    expect(blobs.get(event!.response)).toContain('error')
+  })
+})

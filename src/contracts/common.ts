@@ -52,6 +52,8 @@ export interface ToolResultPart {
   /** 模型实际看到的内容（设计 §6.2 `shown`）。 */
   output: string
   isError?: boolean
+  /** 结果里展示给模型的图片（base64），紧跟在文本之后。 */
+  images?: ImagePart[]
 }
 
 /** 引擎自有的消息类型，结构与 AI SDK 兼容，由适配器互转（方案 D11）。 */

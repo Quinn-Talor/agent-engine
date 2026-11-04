@@ -107,6 +107,15 @@ export function transcriptMessages(
             toolName: r.toolName,
             output: blobs.get(r.shown) ?? '',
             isError: r.isError,
+            ...(r.images && r.images.length > 0
+              ? {
+                  images: r.images.map((i) => ({
+                    type: 'image' as const,
+                    image: blobs.get(i.blob) ?? '',
+                    mediaType: i.mediaType,
+                  })),
+                }
+              : {}),
           })),
         })
         break

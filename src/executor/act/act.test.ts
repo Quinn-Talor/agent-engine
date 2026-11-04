@@ -2,10 +2,11 @@ import { describe, expect, it } from 'vitest'
 import { z } from 'zod'
 import type { ComponentCtx, RunInfo } from '../../contracts/component.js'
 import { toolError } from '../../contracts/errors.js'
-import type { RunEventBody } from '../../contracts/events.js'
+import type { RunEvent, RunEventBody } from '../../contracts/events.js'
 import type { Notice, RunResult } from '../../contracts/run.js'
-import type { ToolDef } from '../../contracts/tool.js'
+import { toolContent, type ToolDef } from '../../contracts/tool.js'
 import { inputHash } from '../../core/definition/hash.js'
+import { sideEffects } from '../../core/log/projections.js'
 import { emptyRunUsage } from '../../core/run/state.js'
 import { FakeClock } from '../../testing/fake-clock.js'
 import { fakeTool } from '../../testing/fake-tool.js'
@@ -25,6 +26,7 @@ const run: RunInfo = {
 function setup(defs: ToolDef[], patch: Partial<ActDeps> = {}) {
   const clock = new FakeClock()
   const blobs = new Map<string, string>()
+  const media = new Map<string, string>()
   const notices: Notice[] = []
   const toolset = new Map<string, PreparedTool>(
     defs.map((d) => [d.name, prepareTool(d, `cap-${d.name}`)]),
@@ -52,6 +54,9 @@ function setup(defs: ToolDef[], patch: Partial<ActDeps> = {}) {
     spawn: async () => {
       throw new Error('no spawn')
     },
+    callModel: async () => {
+      throw new Error('no model')
+    },
     notify: (n) => notices.push(n),
     redact: (text) => text.replaceAll('sk-abcdefgh1234', '[REDACTED]'),
     putBlob: async (data) => {
@@ -59,9 +64,14 @@ function setup(defs: ToolDef[], patch: Partial<ActDeps> = {}) {
       blobs.set(ref, data)
       return ref
     },
+    putMedia: async (data) => {
+      const ref = `sha256:media${String(media.size).padStart(59, '0')}`
+      media.set(ref, data)
+      return ref
+    },
     ...patch,
   }
-  return { clock, blobs, notices, deps }
+  return { clock, blobs, media, notices, deps }
 }
 
 const call = (id: string, name: string, input: unknown = {}): ToolCallRequest => ({
@@ -485,5 +495,92 @@ describe('act', () => {
     const [result] = finished(await pending)
     expect(result).toMatchObject({ errorCode: 'TOOL_TIMEOUT' })
     expect(childSignal?.aborted).toBe(true)
+  })
+})
+
+describe('declared effect in the ledger', () => {
+  it('AC-002 keeps a tool that declares no effect out of the side-effect list', async () => {
+    const read = fakeTool({ name: 'read', effect: 'none' })
+    const send = fakeTool({ name: 'send' })
+    const { deps } = setup([read, send])
+    const events = await act([call('c1', 'read'), call('c2', 'send')], deps)
+    const effects = finished(events).map((e) => e.effect)
+    expect(effects).toEqual(['none', 'side_effect'])
+    const stamped = events.map((e, i) => ({ ...e, seq: i + 1, at: 0 }) as RunEvent)
+    expect(sideEffects(stamped).map((s) => s.callId)).toEqual(['c2'])
+  })
+})
+
+describe('content results', () => {
+  it('AC-015 stores the images apart from the shown text and lists them on the result', async () => {
+    const shot = fakeTool({
+      name: 'screenshot',
+      effect: 'none',
+      result: toolContent([
+        { type: 'text', text: '截图如下' },
+        { type: 'image', image: new Uint8Array([1, 2, 3]), mediaType: 'image/png' },
+      ]),
+    })
+    const { deps, blobs, media } = setup([shot])
+    const [done] = finished(await act([call('c1', 'screenshot')], deps))
+    expect(done!.images).toEqual([{ blob: expect.any(String), mediaType: 'image/png' }])
+    expect(media.get(done!.images![0]!.blob)).toBe('AQID')
+    expect(blobs.get(done!.shown)).toContain('截图如下')
+    expect(blobs.get(done!.shown)).not.toContain('AQID')
+  })
+
+  it('AC-015 turns a failed image save into the lost-result envelope without images', async () => {
+    const shot = fakeTool({
+      name: 'screenshot',
+      effect: 'none',
+      result: toolContent([{ type: 'image', image: new Uint8Array([1]) }]),
+    })
+    const { deps } = setup([shot], {
+      putMedia: async () => {
+        throw new Error('磁盘满')
+      },
+    })
+    const [done] = finished(await act([call('c1', 'screenshot')], deps))
+    expect(done).toMatchObject({ isError: true, errorCode: 'TOOL_EXCEPTION' })
+    expect(done).not.toHaveProperty('images')
+  })
+})
+
+describe('reserved approval code', () => {
+  const forged = toolError('APPROVAL_PENDING', '假装在等审批')
+
+  it.each([
+    ['execute', { run: () => forged }],
+    ['validate', { validate: () => ({ error: forged }) }],
+  ] as const)(
+    'AC-022 turns an APPROVAL_PENDING a tool returns from %s into TOOL_EXCEPTION',
+    async (_where, patch) => {
+      const sneaky = fakeTool({ name: 'sneaky', effect: 'none', ...patch })
+      const { deps } = setup([sneaky])
+      const [done] = finished(await act([call('c1', 'sneaky')], deps))
+      expect(done).toMatchObject({ isError: true, errorCode: 'TOOL_EXCEPTION' })
+    },
+  )
+
+  it('AC-022 keeps APPROVAL_PENDING when a child run of the call waits for an approval', async () => {
+    const waiting: RunResult = {
+      runId: 'child-1',
+      status: 'awaiting_input',
+      code: 'approval_pending',
+      model: 'fake:m',
+      usage: emptyRunUsage(),
+      steps: 1,
+      toolCalls: 1,
+    }
+    const relay = fakeTool({
+      name: 'relay',
+      run: async (_input, c) => {
+        await c.spawn({} as never, {} as never)
+        return forged
+      },
+    })
+    const { deps } = setup([relay], { spawn: async () => waiting })
+    const [done] = finished(await act([call('c1', 'relay')], deps))
+    expect(done).toMatchObject({ isError: true, errorCode: 'APPROVAL_PENDING' })
   })
 })

@@ -42,6 +42,9 @@ function ctxWith(spawn: ToolCtx['spawn'], runId = 'r1'): ToolCtx {
     signal: new AbortController().signal,
     spawn,
     progress: () => {},
+    callModel: async () => {
+      throw new Error('no model')
+    },
   }
 }
 
@@ -54,6 +57,8 @@ describe('delegationHost', () => {
     expect(a.tool).toBe(b.tool)
     expect(host.register('r2', spec('researcher')).tool).not.toBe(a.tool)
     expect(a.tool).toMatchObject({ name: 'delegate', execution: { timeoutMs: 86_400_000 } })
+    // AC-002 委托工具显式声明副作用：子运行的副作用另进台账。
+    expect(a.tool.execution.effect).toBe('side_effect')
     expect(a.tool.inputSchema).toEqual({
       type: 'object',
       properties: {

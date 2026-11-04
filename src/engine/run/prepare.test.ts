@@ -22,6 +22,7 @@ const def = (name: string, patch: Partial<ToolDef> = {}): ToolDef => ({
   inputSchema: z.object({ q: z.string().optional() }),
   execute: async () => 'ok',
   ...patch,
+  execution: patch.execution ?? { effect: 'side_effect' },
 })
 
 const cap = (id: string, prepared: Partial<Prepared> | (() => Promise<Prepared>)): Capability => ({

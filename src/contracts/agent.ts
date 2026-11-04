@@ -3,7 +3,7 @@
 import type { Capability } from './capability.js'
 import type { Segment } from './common.js'
 import type { Check, Exposure, Fallback, OutputContract } from './component.js'
-import type { ModelRef, ModelRequirements } from './model.js'
+import type { ModelRef, ModelRequirements, ModelSettings } from './model.js'
 
 /** 交什么、怎么验收、做不完时交什么。 */
 export interface Deliverable {
@@ -23,7 +23,7 @@ export interface AgentDef {
   toolbox?: { exposure?: Exposure }
   /** 默认 { output: text(), checks: [completionReview()], fallback: standardFallback() }。 */
   deliverable?: Deliverable
-  model?: { prefer?: ModelRef; requires?: ModelRequirements }
+  model?: { prefer?: ModelRef; requires?: ModelRequirements; settings?: ModelSettings }
 }
 
 export interface Agent extends Readonly<AgentDef> {

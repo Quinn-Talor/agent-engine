@@ -163,7 +163,15 @@ describe('deliver — normal path', () => {
       kind: 'structured',
       maxRepairs: 1,
       schema,
-      tools: [{ name: 'submit', description: '', inputSchema: schema, execute: async () => 'ok' }],
+      tools: [
+        {
+          name: 'submit',
+          description: '',
+          inputSchema: schema,
+          execution: { effect: 'none' },
+          execute: async () => 'ok',
+        },
+      ],
       validate: async () => ({ ok: false, issues: ['分数不合理'], hint: '重新评估' }),
     }
     const s = setup({ output })
@@ -180,7 +188,15 @@ describe('deliver — normal path', () => {
       version: '1',
       kind: 'structured',
       schema,
-      tools: [{ name: 'submit', description: '', inputSchema: schema, execute: async () => 'ok' }],
+      tools: [
+        {
+          name: 'submit',
+          description: '',
+          inputSchema: schema,
+          execution: { effect: 'none' },
+          execute: async () => 'ok',
+        },
+      ],
       validate: async (c) => {
         validated = c.output
         return { ok: true }

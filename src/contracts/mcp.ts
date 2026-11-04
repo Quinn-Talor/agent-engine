@@ -36,7 +36,8 @@ export interface McpToolInfo {
 }
 
 export interface McpCallResult {
-  content: Array<{ type: string; text?: string }>
+  /** MCP 的内容块：`image` 块带 base64 的 `data` 与 `mimeType`。 */
+  content: Array<{ type: string; text?: string; data?: string; mimeType?: string }>
   isError?: boolean
   structuredContent?: unknown
 }

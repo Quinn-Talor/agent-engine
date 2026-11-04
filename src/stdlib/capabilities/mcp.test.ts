@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { createMcpHost, hashOf, isToolError, type McpServerSpec, type ToolCtx } from '../../sdk.js'
+import {
+  createMcpHost,
+  hashOf,
+  isToolContent,
+  isToolError,
+  type McpServerSpec,
+  type ToolCtx,
+} from '../../sdk.js'
 import { FakeClock } from '../../testing/fake-clock.js'
 import { fakeMcpServer, type FakeMcpTool } from '../../testing/fake-mcp-server.js'
 import { mcp } from './mcp.js'
@@ -291,5 +298,31 @@ describe('mcp', () => {
     await expect(mcp(crm).prepare(prepareCtx({ host: <T>() => host as T }))).rejects.toThrow(
       '连接失败',
     )
+  })
+})
+
+describe('mcp image results', () => {
+  it('AC-018 maps image blocks to image parts and keeps other blocks as text', async () => {
+    const shot: FakeMcpTool = {
+      name: 'shot',
+      annotations: { readOnlyHint: true },
+      handler: () => ({
+        content: [
+          { type: 'text', text: '页面截图' },
+          { type: 'image', data: 'AQID', mimeType: 'image/png' },
+          { type: 'audio', data: 'BB' },
+        ],
+      }),
+    }
+    const { prepared } = await prepare(crm, [shot])
+    const out = await prepared.tools[0]!.execute({}, ctx)
+    expect(isToolContent(out)).toBe(true)
+    expect(isToolContent(out) && out.parts).toEqual([
+      { type: 'text', text: '页面截图' },
+      { type: 'image', image: 'AQID', mediaType: 'image/png' },
+      { type: 'text', text: '[audio]' },
+    ])
+    const text = await (await prepare(crm, TOOLS)).prepared.tools[0]!.execute({}, ctx)
+    expect(text).toBe('客户 A\n等级 VIP')
   })
 })

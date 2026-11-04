@@ -8,7 +8,30 @@ const def = (inputSchema: ToolDef['inputSchema'], patch: Partial<ToolDef> = {}):
   description: 'search the web',
   inputSchema,
   execute: async () => 'ok',
+  execution: { effect: 'none' },
   ...patch,
+})
+
+describe('declared effect', () => {
+  it('AC-001 a tool definition must declare its effect', () => {
+    // @ts-expect-error 没写 execution：副作用类型必须声明
+    const missing: ToolDef = {
+      name: 'x',
+      description: 'x',
+      inputSchema: {},
+      execute: async () => 1,
+    }
+    // @ts-expect-error 写了 execution 但没写 effect
+    const partial: ToolDef = { ...missing, execution: { timeoutMs: 1_000 } }
+    expect([missing.name, partial.name]).toEqual(['x', 'x'])
+  })
+
+  it.each(['none', 'idempotent', 'side_effect'] as const)(
+    'AC-002 prepares the declared effect %s',
+    (effect) => {
+      expect(prepareTool(def(z.object({}), { execution: { effect } }), 'web').effect).toBe(effect)
+    },
+  )
 })
 
 describe('prepareTool', () => {
@@ -32,9 +55,8 @@ describe('prepareTool', () => {
     expect(() => prepareTool(def({ type: 'nope' }), 'web')).toThrow('search 的 schema 不能编译')
   })
 
-  it('defaults effect to side_effect and the invalid input code to INVALID_INPUT', () => {
+  it('defaults the invalid input code to INVALID_INPUT', () => {
     const tool = prepareTool(def(z.object({})), 'web')
-    expect(tool.effect).toBe('side_effect')
     expect(tool.invalidInputCode).toBe('INVALID_INPUT')
     expect(tool.available).toBeUndefined()
   })

@@ -51,7 +51,7 @@ function rawMessage(message: ModelMessage): number {
         total += rawText(part.toolName + JSON.stringify(part.input))
         break
       case 'tool-result':
-        total += rawText(part.output)
+        total += rawText(part.output) + (part.images?.length ?? 0) * MEDIA_TOKENS
         break
     }
   }

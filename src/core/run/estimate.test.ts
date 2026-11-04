@@ -15,6 +15,31 @@ describe('estimateText', () => {
 })
 
 describe('estimateMessages', () => {
+  it('AC-019 counts each image of a tool result as 85', () => {
+    const result = (images: number): ModelMessage => ({
+      role: 'tool',
+      content: [
+        {
+          type: 'tool-result',
+          toolCallId: 'c1',
+          toolName: 'screenshot',
+          output: '截图如下',
+          isError: false,
+          ...(images > 0
+            ? {
+                images: Array.from({ length: images }, () => ({
+                  type: 'image' as const,
+                  image: 'AQID',
+                })),
+              }
+            : {}),
+        },
+      ],
+    })
+    expect(estimateMessages([result(1)]) - estimateMessages([result(0)])).toBe(85)
+    expect(estimateMessages([result(2)]) - estimateMessages([result(0)])).toBe(170)
+  })
+
   it('AC-001 counts an image part as 85', () => {
     const messages: ModelMessage[] = [
       { role: 'user', content: [{ type: 'image', image: 'data:image/png;base64,AAAA' }] },

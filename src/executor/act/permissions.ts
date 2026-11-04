@@ -40,6 +40,8 @@ const POLICY_DENIED_HINT =
   '这是规则的限制：本次任务里不要重试，也不要换工具或换写法去做同一件事；向委托人说明被拒绝的原因，或只做不受限制的部分'
 const USER_DENIED_HINT =
   '委托人拒绝了这个操作：本次任务里不要重试，也不要换工具或换写法去做同一件事；改做其他部分，或向委托人说明'
+const APPROVAL_PENDING_HINT =
+  '这次调用在等委托人审批，没有执行：不要重试，也不要换做法；委托人答复后会接着做'
 const APPROVAL_FAILED_HINT =
   '这个操作没有得到审批：不要反复请求，改用其他做法，或说明需要委托人审批'
 
@@ -146,14 +148,34 @@ export async function checkPermission(
       }
     }
     const answer = outcome.value
+    // 稍后答复：不执行，本轮以 approval_pending 结束（判定见 decide）；批准记录归审批人。
+    if ('defer' in answer && typeof answer.defer === 'string' && answer.defer.trim() !== '') {
+      events.push({
+        t: 'approval_answered',
+        callId: call.callId,
+        approved: false,
+        deferred: true,
+        waitedMs,
+      })
+      return {
+        events,
+        allowed: false,
+        error: toolError(
+          'APPROVAL_PENDING',
+          `审批稍后答复：${answer.defer}`,
+          APPROVAL_PENDING_HINT,
+        ),
+      }
+    }
+    const decided = 'approved' in answer ? answer : { approved: false }
     events.push({
       t: 'approval_answered',
       callId: call.callId,
-      approved: answer.approved,
-      ...(answer.remember ? { remember: answer.remember } : {}),
+      approved: decided.approved,
+      ...('remember' in decided && decided.remember ? { remember: decided.remember } : {}),
       waitedMs,
     })
-    return answer.approved
+    return decided.approved
       ? { events, allowed: true }
       : {
           events,

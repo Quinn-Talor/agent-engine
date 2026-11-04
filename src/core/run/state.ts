@@ -3,7 +3,7 @@
 
 import type { ModelMessage, ReasoningPart, TextPart, ToolCallPart } from '../../contracts/common.js'
 import type { CallBlock, Intervention, Observation, Verdict } from '../../contracts/component.js'
-import type { BlobRef, RunEvent } from '../../contracts/events.js'
+import type { BlobRef, RunEvent, ToolResultImage } from '../../contracts/events.js'
 import type { ModelRef, ModelResponse, NormalizedUsage, RunUsage } from '../../contracts/model.js'
 import type { RunResult, RunStatus } from '../../contracts/run.js'
 import type { ToolEffect, ToolIntent } from '../../contracts/tool.js'
@@ -34,7 +34,13 @@ export type TranscriptEntry =
   | {
       origin: 'tool'
       step: number
-      results: Array<{ callId: string; toolName: string; shown: BlobRef; isError: boolean }>
+      results: Array<{
+        callId: string
+        toolName: string
+        shown: BlobRef
+        isError: boolean
+        images?: ToolResultImage[]
+      }>
     }
   | { origin: 'hint'; step: number; source: string; text: string }
   | { origin: 'steer'; step: number; text: string }
@@ -148,19 +154,21 @@ export const emptyRunUsage = (): RunUsage => ({
   main: emptyUsage(),
   memory: emptyUsage(),
   supervision: emptyUsage(),
+  tools: emptyUsage(),
   children: emptyUsage(),
 })
 
-export type UsageBucket = 'main' | 'memory' | 'supervision' | 'children'
+export type UsageBucket = 'main' | 'memory' | 'supervision' | 'tools' | 'children'
 
 function addToBucket(usage: RunUsage, bucket: UsageBucket, delta: NormalizedUsage): RunUsage {
   return { ...usage, ...addUsage(usage, delta), [bucket]: addUsage(usage[bucket], delta) }
 }
 
-/** 外部调用的用量归属：按来源前缀（memory → 记忆，deliver → 主模型，其余 → 监督）。 */
+/** 外部调用的用量归属：按来源前缀（memory → 记忆，deliver → 主模型，tool: → 工具，其余 → 监督）。 */
 export function bucketOf(source: string): UsageBucket {
   if (source.startsWith('memory')) return 'memory'
   if (source.startsWith('deliver')) return 'main'
+  if (source.startsWith('tool:')) return 'tools'
   return 'supervision'
 }
 
@@ -435,12 +443,16 @@ export function apply(state: RunState, e: RunEvent): RunState {
             {
               origin: 'tool',
               step: s.step,
-              results: calls.map((c) => ({
-                callId: c.id,
-                toolName: c.name,
-                shown: results[c.id]!.shown,
-                isError: results[c.id]!.isError,
-              })),
+              results: calls.map((c) => {
+                const r = results[c.id]!
+                return {
+                  callId: c.id,
+                  toolName: c.name,
+                  shown: r.shown,
+                  isError: r.isError,
+                  ...(r.images && r.images.length > 0 ? { images: r.images } : {}),
+                }
+              }),
             },
           ],
         }

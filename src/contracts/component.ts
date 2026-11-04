@@ -304,13 +304,16 @@ export interface PermissionRule extends Component {
   permit(call: ToolCallView, run: RunInfo, ctx: ComponentCtx): Promise<PermitResult>
 }
 
-export interface ApprovalAnswer {
-  approved: boolean
-  remember?: { scope: 'session' | 'always'; pattern?: string }
-}
+/**
+ * 审批的回答：同意或拒绝（可选记住）；或稍后答复（`defer` 写原因）：这次调用不执行，
+ * 运行以 `awaiting_input` / `approval_pending` 结束，批准记录由审批人自己保存（设计 §9.10）。
+ */
+export type ApprovalAnswer =
+  | { approved: boolean; remember?: { scope: 'session' | 'always'; pattern?: string } }
+  | { defer: string }
 
 export interface Approver {
-  /** "本会话记住"由实现按 run.task.subject 区分，引擎不知道会话。 */
+  /** "本会话记住"由实现按 run.task.subject 区分（会话的一轮缺省为会话 id）。 */
   approve(
     req: AskRequest & { callId: string; toolName: string },
     run: RunInfo,

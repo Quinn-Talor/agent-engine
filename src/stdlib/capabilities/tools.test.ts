@@ -61,6 +61,7 @@ describe('agent fingerprint and tool definitions', () => {
     name: 'q',
     description: 'find records',
     inputSchema: z.object({ s: z.string() }),
+    execution: { effect: 'none' },
     execute: async () => '',
   }
   const fingerprintOf = (def: ToolDef) =>
@@ -72,7 +73,7 @@ describe('agent fingerprint and tool definitions', () => {
       { ...base, inputSchema: z.object({ s: z.number() }) },
       { ...base, execution: { effect: 'side_effect' } },
       { ...base, safety: { risk: 'high' } },
-      { ...base, execution: { timeoutMs: 5_000 } },
+      { ...base, execution: { effect: 'none', timeoutMs: 5_000 } },
       { ...base, semantics: { repeatable: true } },
       { ...base, safety: { access: () => ({ read: [] }) } },
     ]

@@ -4,11 +4,13 @@ import type { Capability } from '../../contracts/capability.js'
 import type { Guard, Memory, PermissionRule } from '../../contracts/component.js'
 import type { EnvironmentConfig } from '../../contracts/environment.js'
 import type { TaskDef } from '../../contracts/task.js'
+import type { ModelSettings } from '../../contracts/model.js'
 import {
   agentFingerprint,
   componentIdentity,
   engineFingerprint,
   environmentFingerprint,
+  modelFingerprint,
   taskFingerprint,
 } from './fingerprint.js'
 
@@ -198,5 +200,30 @@ describe('componentIdentity', () => {
     const identity = componentIdentity({ id: 'x', version: '1' })
     expect(identity).toMatchObject({ id: 'x', version: '1', mode: 'active' })
     expect(identity).not.toEqual(componentIdentity({ id: 'x', version: '1', config: { k: 1 } }))
+  })
+})
+
+describe('sampling settings and model configuration', () => {
+  const withModel = (settings?: ModelSettings): AgentDef => ({
+    id: 'analyst',
+    instructions: [{ role: 'system', parts: [{ type: 'text', text: 'analyse' }] }],
+    model: { prefer: 'fake:m', ...(settings ? { settings } : {}) },
+  })
+
+  it('AC-005 keeps the fingerprint of an agent without settings and tells settings apart', () => {
+    // 加入采样参数之前算出的指纹：没给采样参数的 Agent 指纹不变。
+    expect(agentFingerprint(withModel())).toBe(
+      'f3952330047c30b54dd51ff8cc10cf3307c202c110e8eec85b1d7de5d6c731f9',
+    )
+    const prints = [withModel(), withModel({ temperature: 0.2 }), withModel({ temperature: 0.7 })]
+    expect(new Set(prints.map(agentFingerprint)).size).toBe(3)
+  })
+
+  it('AC-006 fingerprints the port settings, a port without settings like null', () => {
+    expect(modelFingerprint(undefined)).toBe(modelFingerprint(null))
+    expect(modelFingerprint({ vendor: 'openai', headers: ['x-a'] })).toBe(
+      modelFingerprint({ headers: ['x-a'], vendor: 'openai' }),
+    )
+    expect(modelFingerprint({ vendor: 'openai' })).not.toBe(modelFingerprint(undefined))
   })
 })

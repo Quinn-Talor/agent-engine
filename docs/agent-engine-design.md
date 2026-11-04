@@ -131,7 +131,7 @@
 | 能力 `capabilities` | Agent 能做的事：工具、MCP、skill、子 agent、规划、与委托人沟通 | 准备、③ 行动 |
 | 工具箱 `toolbox` | 能力准备后得到的全部工具，以及它们怎么呈现给模型（哪些先露出，哪些按需展开） | ① 组装 |
 | 默认交付物 `deliverable` | 默认交什么、怎么验收、做不完时交什么；任务可以覆盖 | 交付 |
-| 模型偏好与要求 `model` | 偏好哪个模型；对视觉、最小上下文窗口等的要求 | 受理 |
+| 模型偏好与要求 `model` | 偏好哪个模型；对视觉、最小上下文窗口等的要求；主模型调用的采样参数（temperature、topP） | 受理、② 推理 |
 
 ### 1.5 任务
 
@@ -245,8 +245,10 @@ interface AgentDef {
   capabilities?: Capability[]
   toolbox?: { exposure?: Exposure }   // 默认 searchExposure()
   deliverable?: Deliverable           // 默认 { output: text(), checks: [completionReview()], fallback: standardFallback() }
-  model?: { prefer?: ModelRef; requires?: ModelRequirements }
+  model?: { prefer?: ModelRef; requires?: ModelRequirements; settings?: ModelSettings }
 }
+// 采样参数：只用于主模型调用与兜底调用，进入 Agent 指纹；推理档位与厂商参数在模型配置里（§8.1）
+interface ModelSettings { temperature?: number /* 0–2 */; topP?: number /* (0, 1] */ }
 interface Agent extends Readonly<AgentDef> { readonly fingerprint: string }
 
 // —— 任务 ——
@@ -297,7 +299,7 @@ interface RunResult {
   error?: { code: ErrorCode; message: string; retryable: boolean }
   quality?: QualityReport             // 验收未解决的问题和标注结果
   model: ModelRef
-  usage: NormalizedUsage              // 主模型、记忆、监督、子运行分开统计
+  usage: NormalizedUsage              // 主模型、记忆、监督、工具、子运行分开统计
   cost?: number
   steps: number
   toolCalls: number
@@ -424,10 +426,11 @@ interface RunResult {
 | 顺序 | 来源 | 怎么生效 |
 |---|---|---|
 | 1 | 封路违规 `guard:violation` | 本步再次调用了被封住的调用：收尾，code 取封路的 code |
-| 2 | 意图（模型通过意图工具明确表达） | 参与合并 |
-| 3 | 最终候选 `candidate` | 完成 |
-| 4 | 守卫：任务 → 执行环境 → 能力 → 引擎 → 预算守卫 | 参与合并 |
-| 5 | 默认值 | 前面都没有意见时：继续 |
+| 2 | 待审批 `guard:approval` | 本步有调用的审批稍后答复（§9.10）：等待输入，code `approval_pending` |
+| 3 | 意图（模型通过意图工具明确表达） | 参与合并 |
+| 4 | 最终候选 `candidate` | 完成 |
+| 5 | 守卫：任务 → 执行环境 → 能力 → 引擎 → 预算守卫 | 参与合并 |
+| 6 | 默认值 | 前面都没有意见时：继续 |
 
 **合并**：按"停止 > 等待输入 > 完成 > 收尾 > 继续"取最高的一条。完成排在收尾之前：守卫不能给出完成，也不能阻止完成，完成只由交付验收判定。
 
@@ -505,7 +508,7 @@ interface RunResult {
 | 结局 | 含义 | 典型 code |
 |---|---|---|
 | `completed` | 交付了结果 | —；以意图工具完成时为该意图的 code，如 `finish` |
-| `awaiting_input` | 需要委托人回复才能继续 | `ask_user`、`propose`、守卫给出的 code |
+| `awaiting_input` | 需要委托人回复才能继续 | `ask_user`、`propose`、`approval_pending`、守卫给出的 code |
 | `finalized` | 没完成，给出了阶段性交付 | `repeat`、`failure_streak`、`stall`、`no_progress`、`max_steps`、`timeout`、`empty_output`、`user_denied`、`spawn_failed`、`external_failure`、`truncated` |
 | `stopped` | 没完成，直接停止 | `blocked`、`stale_dossier`、`content_filter`、`context_overflow`、`budget`、`timeout`、`guard_error:<id>` |
 | `failed` | 出错 | `model_error`、`model_unsuitable`、`output_invalid`、`invalid_agent`、`invalid_task`、`admission_timeout`、`engine_error` |
@@ -570,7 +573,7 @@ interface RunResult {
 | 结构化交付的自修次数 | 输出契约 | 3 次 | `failed` / `output_invalid` |
 | 拦截次数 | 每项验收 | 1 次 | 放行，问题记入 `quality` |
 
-预算的计入范围：主模型调用、记忆和监督的模型调用、子运行。所有时间都取自时钟。
+预算的计入范围：主模型调用、记忆和监督的模型调用、工具经 `ctx.callModel` 的模型调用、子运行。所有时间都取自时钟。
 
 ---
 
@@ -671,7 +674,7 @@ interface Prepared {
   }
   ```
 
-  MCP 工具的 annotations 映射为副作用类型：`readOnlyHint` → `none`，`idempotentHint` → `idempotent`，其余为 `side_effect`。工具返回 `isError` 时记为 `TOOL_EXCEPTION`；协议不区分错误类别，缺省按瞬时处理（同样的输入允许再试一次）。应用可以用 `errorClass` 声明类别，声明为 `deterministic` 的失败第一次就被封路。
+  MCP 工具的 annotations 映射为副作用类型：`readOnlyHint` → `none`，`idempotentHint` → `idempotent`，其余为 `side_effect`。工具返回的图片块（`image`，带 base64 的 `data` 与 `mimeType`）作为图片交给模型（§8.2 h 规整），音频等其他非文本块仍是一行占位；工具返回 `isError` 时记为 `TOOL_EXCEPTION`；协议不区分错误类别，缺省按瞬时处理（同样的输入允许再试一次）。应用可以用 `errorClass` 声明类别，声明为 `deterministic` 的失败第一次就被封路。
 - **插件**：Claude Code 格式的插件由格式解析器拆开，用在哪、启用哪些由应用决定：
 
   | 插件内容 | 解析成 | 交给 |
@@ -741,6 +744,12 @@ interface Prepared {
 | 结局类型 | 新的原因用 code 表达 |
 | 不变量（§7） | 稳定性的底线 |
 | 运行日志格式 | 演进靠 `schemaVersion` 和升级器 |
+
+**已认可的变更**
+
+| 变更 | 原因 | 认可 |
+|---|---|---|
+| 判定的来源顺序加入待审批 `guard:approval`，排在封路违规之后、意图之前（§3.10）；合并规则不变 | 审批稍后答复时这一轮必须停下等委托人；它给出的是等待输入，排在意图之前，模型同时请求输入时结局的 code 取 `approval_pending`，守卫的停止仍然优先 | 2026-11-04 |
 
 **契约的版本策略**
 
@@ -912,7 +921,7 @@ type RunEvent = { seq: number; at: number } & (
       environment: { name: string; fingerprint: string; principalReachable: boolean };
       engine: { fingerprint: string };
       capabilities: CapabilitySnapshot[]; unavailable: Array<{ capability: string; reason: string }>;
-      model: ModelRef; contextLimit: number; outputReserve: number; queuedMs: number;
+      model: ModelRef; modelFingerprint: string; contextLimit: number; outputReserve: number; queuedMs: number;
       parentRunId?: string; rootRunId: string; schemaVersion: number; session?: SessionStarted }
   | { t: 'step_started'; step: number }
   | { t: 'intervention_applied'; step: number; intervention: Intervention; source: string; until?: number }
@@ -922,11 +931,12 @@ type RunEvent = { seq: number; at: number } & (
   | { t: 'model_failed'; step: number; error: ModelError; partialText?: string; startedAt: number }
   | { t: 'model_aborted'; step: number; partialText: string }
   | { t: 'permission_decided'; callId: string; verdict: PermissionVerdict; source: string }
-  | { t: 'approval_answered'; callId: string; approved: boolean; remember?: RememberScope; waitedMs: number }
+  | { t: 'approval_answered'; callId: string; approved: boolean; remember?: RememberScope; deferred?: true; waitedMs: number }
   | { t: 'tool_finished'; callId: string; capability: string; effect: ToolEffect;
       shown: BlobRef; raw?: BlobRef; isError: boolean; errorCode?: string;
       startedAt: number; durationMs: number; childRunId?: string; childRunIds?: string[]
-      possiblyExecuted?: true; errorClass?: 'deterministic' | 'transient' }
+      possiblyExecuted?: true; errorClass?: 'deterministic' | 'transient';
+      images?: Array<{ blob: BlobRef; mediaType: string }> }   // 工具返回的图片（§8.2 h 规整）
   | { t: 'external_call'; source: string; kind: 'model' | 'hook' | 'record';
       request: BlobRef; response: BlobRef; usage?: NormalizedUsage; startedAt: number; durationMs: number }
   | { t: 'steer_received'; text: string }
@@ -947,9 +957,11 @@ type RunEvent = { seq: number; at: number } & (
 **写入规则**
 
 - **按消息存 blob**：`context_built` 只记录每条消息的 blob 引用，blob 按 sha256 去重。
-- **工具结果存两份**：`shown` 是模型实际看到的内容；`raw` 是原始输出，超过 1MB 时截断，并记录原始大小。
+- **工具结果存两份**：`shown` 是模型实际看到的内容；`raw` 是原始输出，超过 1MB 时截断，并记录原始大小。结果里的图片以 base64 文本另存 blob（`images`），不脱敏：按文本模式替换会改坏图片数据，图片里的文字也匹配不到；图片里需要遮挡的内容由工具在返回前处理。这是下一条脱敏规则的例外。
 - **先脱敏再写入**：凭据引用解析出的值（8 位以上）、provider key 原值，以及 `sk-`、`Bearer` 等模式；先编码成 JSON 再脱敏的文本，也按凭据的 JSON 转义形式替换。blob 引用和 id、哈希、指纹字段不脱敏，避免破坏引用。
 - **任务内容**：`run_started.task.content` 引用任务输入与 history 的 blob，回归重放据此重建交付验收的语料；会话的一轮里 history 就是冻结的窗口，元数据（序号、接续点、轮起点、摘要、台账）在 `run_started.session`。
+- **格式版本**：`run_started.schemaVersion` 当前为 2（版本 2 起 `modelFingerprint` 与用量的 `tools` 分组成为必填）；读取版本 1 的日志时由升级器补上这两项。
+- **模型配置指纹**：`run_started.modelFingerprint` 是端口声明的调用参数（`ModelPort.settings`）的哈希，必填；平台改了某个模型的厂商参数或推理档位，前后运行的指纹不同。
 - **输出预留**：`run_started.outputReserve` 记下给输出留的 token（模型声明的输出上限，最多取窗口的一半），输入上限 = `contextLimit` − 它；两个字段都必填。
 - **补齐缺失的结果**：工具结果没能写进日志（例如存储暂时失败）时，运行结束前补上 `TOOL_MISSING_RESULT`，保证调用都有结果；它和 `TOOL_ABORTED` 一样计入"可能已执行"的副作用。
 
@@ -961,7 +973,7 @@ type RunEvent = { seq: number; at: number } & (
 | Transcript | 运行记录，每条带 `origin` |
 | Observation[] | 每步的事实 |
 | Deliveries | 每次交付尝试：输出校验、验收结果、去向 |
-| NormalizedUsage | 用量：主模型、记忆、监督、子运行分开 |
+| NormalizedUsage | 用量：主模型、记忆、监督、工具、子运行分开 |
 | Trace | 观测树：运行 → 步 → 模型调用 / 工具 / 外部调用 / 子运行；每个节点带开始时间和耗时（§6.6） |
 | SideEffects | 已执行的副作用清单 |
 | SupervisionStats | 守卫告知与终止、顺延、纠偏消息、告知有效、封路违规、顾问采纳、验收结果 |
@@ -975,13 +987,14 @@ type RunEvent = { seq: number; at: number } & (
 
 | 指纹 | 组成 | 用途 |
 |---|---|---|
-| Agent | id、指令哈希、每项能力的 id / 种类 / 版本 / 配置哈希、工具呈现、默认交付物、模型偏好与要求 | 统计和回放按它区分 agent；`version` 只是业务标签，不参与 |
+| Agent | id、指令哈希、每项能力的 id / 种类 / 版本 / 配置哈希、工具呈现、默认交付物、模型偏好与要求、采样参数（给了才计入） | 统计和回放按它区分 agent；`version` 只是业务标签，不参与 |
 | 任务 | 输入与 history 的哈希、业务上下文、交付物、目标、守卫、预算、作业范围 | 追溯这次做的是什么 |
 | 执行环境 | 名称、委托人能否联系上、须知哈希、权限规则、守卫、强制验收、上限 | 区分不同的规矩 |
 | 引擎 | 记忆与引擎守卫的 id / 版本 / 配置哈希（守卫另含 `onError`）；引擎替 Agent 补上的默认交付物（输出契约、验收、兜底）与默认工具呈现 | 平台机制与默认组件升级前后可以区分 |
 | 能力快照 | MCP 工具列表哈希、skill 内容哈希、子 agent 指纹 | 追溯这次到底用了什么 |
+| 模型配置 | 端口声明的调用参数（`ModelPort.settings`）：AI SDK 适配器为厂商、推理档位、是否丢弃历史推理、`providerOptions`、顶层 `reasoning` 与 header 名（不含 header 值） | 平台改了模型参数，前后运行可以区分 |
 
-五类指纹和实际模型都写入 `run_started`。统计和评测按"Agent 指纹 × 模型 × 执行环境 × 引擎指纹"汇总。
+五类指纹、模型配置指纹和实际模型都写入 `run_started`。统计和评测按"Agent 指纹 × 模型 × 执行环境 × 引擎指纹"汇总。
 
 ### 6.5 重放
 
@@ -1033,7 +1046,7 @@ type RunEvent = { seq: number; at: number } & (
 | I5 | 工具层的任何失败都包成错误信封回给模型 | 流水线的每个环节都产出 `ToolErrorEnvelope` |
 | I6 | 不合格的交付不会以 `completed` 结束 | 交付环节先校验输出；拦截类验收不通过时退回（次数用完后放行，问题写入 `quality`） |
 | I7 | 上下文估算达到输入上限（模型窗口减去输出预留）时，不调用模型 | 在 ① 组装强制检查；主调用与兜底调用的 `maxOutputTokens` 取输出预留 |
-| I8 | 每一次模型调用都写入日志并计入预算 | 组件只能通过 `ctx.callModel` 调用模型 |
+| I8 | 每一次模型调用都写入日志并计入预算 | 组件只能通过 `ctx.callModel` 调用模型；工具经 `ctx.callModel` 的调用同样写日志、计入预算（工具是业务代码，引擎不能阻止它另用客户端） |
 | I9 | 模型错误一定带上分类后的错误码 | 以 `failed` / `model_error` 结束，`error.code` 为分类码 |
 | I10 | 相同的事件序列产生相同的状态和环节 | 核心是纯函数；组件只能从 `ctx` 取时间、随机数和做 I/O |
 | I11 | 每个裁决和交付结果都能找到来源 | 来源写入 `evaluated`、`delivery_checked`、`permission_decided` |
@@ -1064,8 +1077,10 @@ interface ModelPort {
   ref: ModelRef
   capabilities: { contextLimit: number; maxOutputTokens: number; vision: boolean; toolCalls: boolean;
                   reasoning: 'none' | 'optional' | 'forced'; systemAfterUser: boolean; parallelToolCalls: boolean }
+  readonly settings?: unknown                 // 每次调用都带上的配置（可序列化），只用于模型配置指纹（§6.4）；凭据不放进来
   call(input: ModelInput, opts: { signal: AbortSignal; onDelta: (d: Delta) => void }): Promise<ModelResponse>
 }
+// ModelInput 的 temperature、topP 来自 Agent 的采样参数（§2），只出现在主模型调用与兜底调用里
 interface ModelResponse {
   text: string
   reasoning?: { text: string; providerData?: unknown }   // 保留签名，回放时原样带回
@@ -1092,6 +1107,9 @@ interface ModelResponse {
 | 重试 | 建连阶段沿用 SDK `maxRetries`：默认 2 次，指数退避，起点 2 秒，遵守 60 秒以内的 retry-after，只对 408/409/429/5xx 重试。流中途失败且还没收到任何内容时，可重试的错误再试一次。每次尝试写入 `attempts` |
 | 错误分类 | 剥开 `NoOutputGeneratedError` 后，归类为 `MODEL_TIMEOUT`、`MODEL_CONNECTION`、`RATE_LIMITED`（可重试，计入熔断）、`AUTH_FAILED`、`CONTEXT_TOO_LONG`（按 `context_overflow` 处理）、`CONTENT_FILTER`、`MODEL_ERROR` |
 | reasoning 参数 | Anthropic：thinking 预算 2048 / 4096 / 8192；OpenAI：`reasoningEffort`，并开启 `parallelToolCalls`；Google：`thinkingConfig`，关闭时为 0；Ollama：`think`。强制开启 thinking 的模型，只有用户选择关闭时才注入关闭参数。SDK 会过滤的厂商私有参数在 fetch 层注入 |
+| 采样参数 | `ModelInput` 带 `temperature`、`topP` 时原样传给 `streamText`，不带时不发 |
+| 端口参数 | `settings` 为厂商、推理档位、是否丢弃历史推理、`providerOptions`、顶层 `reasoning` 与排好序的 header 名；header 值可能是凭据，不计入 |
+| 工具结果的图片 | 模型支持视觉（`capabilities.vision`）时，带图片的工具结果发成内容（文本 + 图片文件）；不支持时发文本，末尾加一行"[图片 N 张：模型不支持视觉，未展示]" |
 | 应用调用参数 | 应用为模型声明的 `callSettings`：`providerOptions` 按厂商键与上面的 reasoning 参数逐字段合并，同一字段应用优先（具体的厂商参数优先于通用的推理档位，与 AI SDK 一致）；`headers` 与 AI SDK 的顶层 `reasoning` 原样传入。参数随模型配置固定。顶层 `reasoning` 与上面的 reasoning 参数是同一件事的两个通用开关，只能给一个，两个都给时创建提供方即报错 |
 | 消息规整 | `systemAfterUser=false` 的厂商：把 user 之后的 system 消息改写成带固定标记的 user 内容。清洗泄漏的工具调用标记 |
 | 推理回放 | 推理内容和签名原样带回；某个模型不能稳定接受带签名的回放时，适配器可以配置为丢弃历史推理内容 |
@@ -1112,8 +1130,8 @@ interface ToolDef {
     access?(input: unknown): { read?: string[]; write?: string[]; network?: boolean }
     risk?: 'low' | 'high'
   }
-  execution?: {                                // 供流水线使用
-    effect?: 'none' | 'idempotent' | 'side_effect'   // 默认 side_effect
+  execution: {                                 // 供流水线使用
+    effect: 'none' | 'idempotent' | 'side_effect'    // 必填，没有缺省值
     exclusive?: boolean
     timeoutMs?: number                         // 默认 30 秒
     maxOutputChars?: number                    // 默认 8KB
@@ -1131,7 +1149,12 @@ interface ToolCtx {
   signal: AbortSignal
   spawn(agent: Agent, task: Task, opts?: { environment?: Environment }): Promise<RunResult>
   progress(note: string): void
+  callModel(req: SideModelRequest): Promise<SideModelResponse | undefined>
+  // 经引擎调用模型：记为 external_call（来源 tool:<工具名>/<用途>），计入预算与 tools 用量（I8）；
+  // 跟随这次调用的取消与超时，不另加组件时限
 }
+// 内容块结果：工具返回 toolContent([...文本块, ...图片块])，判断只认结构化标记 __agent_content
+function toolContent(parts: Array<TextPart | ImagePart>): { __agent_content: true; parts: Array<TextPart | ImagePart> }
 ```
 
 `ToolDef` 可以装饰：工具结果缓存、按数据源限频、计费。
@@ -1142,12 +1165,12 @@ interface ToolCtx {
 | b 封路 | 是否命中生效的封路（工具名 + 输入哈希） | `TOOL_BLOCKED`（原因、封住的步、替代做法、"再调用将收尾"） |
 | c 参数校验 | 校验所有声明的字段；诊断包括缺了哪些、传了哪些、期望的 schema、拼写相近时的"你是不是想用 X" | `INVALID_INPUT` |
 | d 工具自校验 | 调用 `validate` | 工具给出的信封 |
-| e 权限与审批 | 执行环境的权限规则；需要时等待委托人审批 | `PERMISSION_DENIED` / `USER_DENIED`；规则自己没能判断（出错、hook 超时）为 `PERMISSION_UNAVAILABLE`，审批没有回应或审批服务出错为 `APPROVAL_TIMEOUT` / `APPROVAL_UNAVAILABLE`（都拒绝调用，但按暂时性错误处理） |
+| e 权限与审批 | 执行环境的权限规则；需要时等待委托人审批 | `PERMISSION_DENIED` / `USER_DENIED`；审批人稍后答复为 `APPROVAL_PENDING`；规则自己没能判断（出错、hook 超时）为 `PERMISSION_UNAVAILABLE`，审批没有回应或审批服务出错为 `APPROVAL_TIMEOUT` / `APPROVAL_UNAVAILABLE`（都拒绝调用，但按暂时性错误处理） |
 | f 熔断 | 所属依赖的熔断器是否打开 | `TOOL_UNAVAILABLE` |
 | g 执行 | 超时即中止，取消信号传给工具；意图工具只返回简短确认 | `TOOL_TIMEOUT` / `TOOL_ABORTED` / `TOOL_EXCEPTION` |
-| h 规整 | 识别错误信封；超长时保留头尾截断并注明原始长度；外面包一层 `<tool_output>` | — |
+| h 规整 | 识别错误信封；内容块结果的文本块拼成正文，图片转成 base64 另存（单张不超过 5,242,880 字节，超出换成一行说明；每次最多 8 张，其余写一行说明；字符串图片只接受 base64）；超长时保留头尾截断并注明原始长度；外面包一层 `<tool_output>` | 内容块不合格（未知类型、URL 图片）：`TOOL_EXCEPTION` |
 
-错误信封的格式为 `{ __agent_error: true, code, message, hint? }`，判断出错只认这个结构化标记。引擎另外定义：`TOOL_MISSING_RESULT`、`TOOL_INTERRUPTED`、`OUTPUT_INVALID`、`INTENT_NOT_ALONE`、`SPAWN_DEPTH_EXCEEDED`、`SPAWN_CYCLE`、`SPAWN_BUDGET`、`SPAWN_LIMIT`。工具可以定义自己的错误码。
+错误信封的格式为 `{ __agent_error: true, code, message, hint? }`，判断出错只认这个结构化标记。`APPROVAL_PENDING` 是引擎保留的码：工具自己返回它时改为 `TOOL_EXCEPTION`，只有审批环节和等审批的子运行能给出它。引擎另外定义：`TOOL_MISSING_RESULT`、`TOOL_INTERRUPTED`、`OUTPUT_INVALID`、`INTENT_NOT_ALONE`、`APPROVAL_PENDING`（审批稍后答复，调用没有执行；子运行因此结束时，委托工具返回同一个码）、`SPAWN_DEPTH_EXCEEDED`、`SPAWN_CYCLE`、`SPAWN_BUDGET`、`SPAWN_LIMIT`。工具可以定义自己的错误码。
 
 ### 8.3 能力宿主
 
@@ -1426,7 +1449,8 @@ interface AskRequest {
 }
 interface Approver {
   approve(req: AskRequest & { callId: string; toolName: string }, run: RunInfo):
-    Promise<{ approved: boolean; remember?: { scope: 'session' | 'always'; pattern?: string } }>
+    Promise<{ approved: boolean; remember?: { scope: 'session' | 'always'; pattern?: string } }
+          | { defer: string }>     // 稍后答复，写原因
     // "本会话记住"由实现按 run.task.subject 区分（会话的一轮缺省为会话 id）
 }
 interface NoticeProvider extends Component {
@@ -1454,6 +1478,7 @@ interface HookSpec {
 - 没有拒绝、但至少一条询问时，交给委托人审批；多条询问合并成一次审批。
 - 委托人联系不上，或没有配置审批时，询问按拒绝处理。
 - "记住"由审批的实现保存；权限规则通过配置读取已授权的范围，读取经 `ctx.record` 留痕。
+- 审批人可以稍后答复（`{ defer }`，例如要等律师复核）：这次调用不执行，结果为 `APPROVAL_PENDING`，`approval_answered` 记 `deferred`，这一轮以 `awaiting_input` / `approval_pending` 结束（§3.10）。批准记录由审批人自己保存；委托人答复后开会话的下一轮，模型再次发起同一调用时审批人直接回答。引擎不在下一轮代为执行（I15）。子运行的调用被延后时，父运行同样以 `approval_pending` 结束。
 
 **hook 翻译**
 
@@ -1648,6 +1673,12 @@ Agent 和任务的定义见 §4.7。
 | 能力 | `ask_user`、`propose` 可用 | `ask_user`、`propose` 在准备环节被排除 |
 | 兜底交付 | 说明进展和卡点，以一个具体问题结尾 | 报告进展和卡点 |
 | 结果处理 | 投影成对话视图；`RunResult.intent` 决定渲染完成摘要、选项还是提议；收到 `delivered` 时结束"核对中" | 在业务事务里提交，并核对业务版本；被引用的运行要 `pin` |
+
+**转交给另一个 Agent**：引擎不提供运行中途换 Agent（I14）。业务需要"这件事交给另一个岗位"时：
+
+1. 给 Agent 一个自定义意图工具，例如 `handoff`，`semantics.intent = { kind: 'complete', code: 'handoff' }`，参数写目标岗位（枚举）和交接说明；
+2. 模型调用它时要同时写一段给用户的话（例如"已为你转给劳动仲裁专员"），这一步照常经过交付验收，运行以 `completed` / `handoff` 结束；
+3. 应用读 `RunResult.intent.input` 里的目标，用目标 Agent 开会话的下一轮。会话不限制每一轮用哪个 Agent，前文与副作用台账照常带入。
 
 ### 12.4 界面隔离
 

@@ -90,6 +90,12 @@ interface RunRow {
 
 const tokens = (u: { input: number; output: number }) => u.input + u.output
 
+/** 事件版本 1 写下的摘要没有 tools 分组，按全 0 读出。 */
+function usageOf(json: string): RunUsage {
+  const stored = JSON.parse(json) as Omit<RunUsage, 'tools'> & { tools?: RunUsage['tools'] }
+  return { ...stored, tools: stored.tools ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } }
+}
+
 function summaryOf(row: RunRow): RunSummary {
   return {
     runId: row.run_id,
@@ -112,7 +118,7 @@ function summaryOf(row: RunRow): RunSummary {
     ...(row.ended_at !== null ? { endedAt: row.ended_at } : {}),
     steps: row.steps,
     toolCalls: row.tool_calls,
-    usage: JSON.parse(row.usage_json) as RunUsage,
+    usage: usageOf(row.usage_json),
     ...(row.cost !== null ? { cost: row.cost } : {}),
     pinned: row.pinned === 1,
   }

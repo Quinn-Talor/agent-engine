@@ -5,7 +5,7 @@
 import type { Clock, LogLevel, ModelMessage, Segment } from '../../contracts/common.js'
 import type { MemoryState, MemoryView, RunInfo, ToolboxState } from '../../contracts/component.js'
 import type { BlobRef, CompactionReason, RunEventBody } from '../../contracts/events.js'
-import type { ModelInput } from '../../contracts/model.js'
+import type { ModelInput, ModelSettings } from '../../contracts/model.js'
 import { visibleToolsIssue } from '../../core/definition/component-results.js'
 import { estimateMessages, estimateTools } from '../../core/run/estimate.js'
 import { canonicalJson, hashOf } from '../../core/definition/hash.js'
@@ -35,6 +35,8 @@ export interface ComposeDeps {
   memoryTimeoutMs?: number
   /** 输出预留：输入上限 = 窗口 − 它，也是请求的 `maxOutputTokens`。 */
   outputReserve: number
+  /** Agent 的采样参数，原样放进每次主模型调用。 */
+  settings?: ModelSettings
   /** 会话的一轮：带入的摘要（history 第一条）、每一轮在 history 里的起点、放在尾部的副作用台账。 */
   session?: { summary?: string; turnStarts: number[]; ledger?: Segment }
 }
@@ -182,6 +184,7 @@ export function createComposer(deps: ComposeDeps): Composer {
           tail: shownTail,
           tools,
           maxOutputTokens: deps.outputReserve,
+          ...deps.settings,
         })
         const estimate = calibrate(estimateMessages(input.messages) + estimateTools(input.tools))
         return { view, input, estimate }

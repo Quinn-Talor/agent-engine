@@ -353,3 +353,42 @@ describe('budgetState', () => {
     expect(budgetState(state, { now: 0, structured: false }).timeLeftMs).toBeUndefined()
   })
 })
+
+describe('approval pending', () => {
+  const pending = observation({
+    toolCalls: [
+      {
+        name: 'send',
+        capability: 'core',
+        inputHash: 'h',
+        outputHash: 'o',
+        ok: false,
+        errorCode: 'APPROVAL_PENDING',
+        effect: 'side_effect',
+        durationMs: 1,
+        blocked: false,
+      },
+    ],
+    allToolsFailed: true,
+  })
+  const awaiting = { awaitInput: { code: 'approval_pending' }, sources: ['guard:approval'] }
+
+  it.each<[string, SourcedOpinion[], object]>([
+    [
+      'a guard stop still wins',
+      [op('engine:a', { stop: { code: 'x', message: 'm' } })],
+      { stop: { code: 'x', message: 'm' }, sources: ['engine:a'] },
+    ],
+    ['it beats a guard finalize', [op('engine:a', { finalize: { code: 'stall' } })], awaiting],
+    ['it beats a warning', [op('engine:a', hint('先说明进展'))], awaiting],
+  ])('AC-012 %s', (_name, opinions, expected) => {
+    expect(decide(pending, opinions, budget())).toEqual(expected)
+  })
+
+  it('AC-012 gives way to a steer that has not taken effect yet', () => {
+    expect(decide(pending, [], budget({ steerPending: true }))).toEqual({
+      continue: { interventions: [] },
+      sources: ['principal:steer'],
+    })
+  })
+})

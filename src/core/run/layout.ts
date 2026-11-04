@@ -15,6 +15,8 @@ export interface ViewParts {
   tools: ModelToolSpec[]
   toolChoice?: 'auto' | 'none'
   maxOutputTokens?: number
+  temperature?: number
+  topP?: number
 }
 
 /** 纯文本的 system 段转为 system 消息；含图片或文件的段转为 user 消息，内容不丢。 */
@@ -81,5 +83,7 @@ export function layout(parts: ViewParts): ModelInput {
   }
   if (parts.toolChoice !== undefined) input.toolChoice = parts.toolChoice
   if (parts.maxOutputTokens !== undefined) input.maxOutputTokens = parts.maxOutputTokens
+  if (parts.temperature !== undefined) input.temperature = parts.temperature
+  if (parts.topP !== undefined) input.topP = parts.topP
   return input
 }

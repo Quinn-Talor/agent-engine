@@ -119,6 +119,10 @@ export function modelHub(opts: ModelHubOptions): ModelHub {
       get capabilities() {
         return port.capabilities
       },
+      // 端口参数同样每次转给提供方，模型配置指纹读到的是当前配置。
+      get settings() {
+        return port.settings
+      },
       async call(input, { signal, onDelta }) {
         await semaphore.acquire(signal)
         try {
