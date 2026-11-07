@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { ModelMessage, ToolCallPart } from '../../sdk.js'
+import type { Modality, ModelMessage, ToolCallPart } from '../../sdk.js'
 import { cleanLeakedToolMarkup, toSdkMessages } from './messages.js'
 
 const view: ModelMessage[] = [
@@ -54,13 +54,13 @@ const plain = {
   systemAfterUser: true,
   dropReasoning: false,
   anthropic: false,
-  vision: false,
+  inputs: [] as Modality[],
   provider: 'mock',
 }
 
 describe('toSdkMessages', () => {
   it('AC-011 converts every part and replays reasoning with its signature', () => {
-    const out = toSdkMessages(view, plain)
+    const out = toSdkMessages(view, { ...plain, inputs: ['image', 'pdf'] })
     expect(out[0]).toEqual({ role: 'system', content: '准则' })
     expect(out[1]).toEqual({
       role: 'user',
@@ -195,14 +195,15 @@ describe('tool results with images', () => {
   }
   const withImage: ModelMessage[] = [{ role: 'tool', content: [shot] }]
   const outputOf = (vision: boolean, provider = 'anthropic.messages') => {
-    const [message] = toSdkMessages(withImage, { ...plain, vision, provider })
+    const inputs: Modality[] = vision ? ['image'] : []
+    const [message] = toSdkMessages(withImage, { ...plain, inputs, provider })
     return (message as { content: Array<{ output: unknown }> }).content[0]!.output
   }
 
   it.each(['anthropic.messages', 'openai.responses', 'google.generative-ai'])(
     'AC-017 sends the image inside the tool result through %s',
     (provider) => {
-      expect(toSdkMessages(withImage, { ...plain, vision: true, provider })).toHaveLength(1)
+      expect(toSdkMessages(withImage, { ...plain, inputs: ['image'], provider })).toHaveLength(1)
       expect(outputOf(true, provider)).toEqual({
         type: 'content',
         value: [
@@ -213,10 +214,10 @@ describe('tool results with images', () => {
     },
   )
 
-  it('AC-017 tells a model without vision that the image was left out', () => {
+  it('AC-006 tells a model without image input that the image was left out', () => {
     expect(outputOf(false)).toEqual({
       type: 'text',
-      value: '截图如下\n[图片 1 张：模型不支持视觉，未展示]',
+      value: '截图如下\n[图片 1 张：模型不支持图片输入，未展示]',
     })
     expect(toSdkMessages(withImage, { ...plain, provider: 'openai.chat' })).toHaveLength(1)
   })
@@ -252,7 +253,7 @@ describe('tool results with images', () => {
       },
       { role: 'assistant', content: '看到了' },
     ]
-    const chat = { ...plain, vision: true, provider: 'openai.chat' }
+    const chat = { ...plain, inputs: ['image'] as Modality[], provider: 'openai.chat' }
 
     it('AC-017 leaves a note in the tool result and sends the images right after the batch', () => {
       const out = toSdkMessages(batch, chat)
@@ -331,5 +332,56 @@ describe('tool results with images', () => {
       })
       expect(out.at(-1)).toEqual({ role: 'user', content: '[system] 提示' })
     })
+  })
+})
+
+describe('user message media', () => {
+  const user = (...content: Exclude<Extract<ModelMessage, { role: 'user' }>['content'], string>) =>
+    toSdkMessages([{ role: 'user', content }], { ...plain, inputs: ['image'] })[0]!.content
+
+  it('AC-007 turns text files into text on every model', () => {
+    const md = `data:text/markdown;base64,${Buffer.from('# 标题').toString('base64')}`
+    const content = toSdkMessages(
+      [
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'file',
+              data: 'eyJhIjoxfQ==',
+              mediaType: 'application/json',
+              filename: 'a.json',
+            },
+            { type: 'file', data: md, mediaType: 'text/markdown' },
+            { type: 'file', data: new TextEncoder().encode('纯文本'), mediaType: 'text/plain' },
+          ],
+        },
+      ],
+      plain,
+    )[0]!.content
+    expect(content).toEqual([
+      { type: 'text', text: '[文件 a.json（application/json）]\n{"a":1}' },
+      { type: 'text', text: '[文件 未命名（text/markdown）]\n# 标题' },
+      { type: 'text', text: '[文件 未命名（text/plain）]\n纯文本' },
+    ])
+  })
+
+  it('AC-008 sends supported media and replaces the rest with a note', () => {
+    expect(
+      user(
+        { type: 'image', image: 'AQID', mediaType: 'image/png' },
+        { type: 'file', data: 'JVBER', mediaType: 'application/pdf', filename: 'b.pdf' },
+        { type: 'file', data: 'AAAA', mediaType: 'audio/mpeg' },
+      ),
+    ).toEqual([
+      { type: 'file', data: 'AQID', mediaType: 'image/png' },
+      { type: 'text', text: '[文件 b.pdf（application/pdf）：模型不支持 pdf 输入，未发送]' },
+      { type: 'text', text: '[文件 未命名（audio/mpeg）：模型不支持 audio 输入，未发送]' },
+    ])
+    const blind = toSdkMessages(
+      [{ role: 'user', content: [{ type: 'image', image: 'AQID' }] }],
+      plain,
+    )[0]!.content
+    expect(blind).toEqual([{ type: 'text', text: '[图片：模型不支持图片输入，未发送]' }])
   })
 })

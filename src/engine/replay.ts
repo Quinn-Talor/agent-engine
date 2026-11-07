@@ -171,6 +171,7 @@ export async function regressionReplay(input: RegressionInput): Promise<Regressi
   let state: RunState = initial({ runId: run.runId })
   const seen: RunEvent[] = []
   // 语料的构造与运行时一致（run-driver.ts）：任务输入、history、带工具名/副作用/是否出错的工具输出。
+  // 语料只用文本，内容里图片与文件的引用（`{ $blob }`）不取回。
   let content: Promise<{ input: Task['input']; history: ModelMessage[] }> | undefined
   const logged = () =>
     (content ??= getBlob(started.task.content).then(

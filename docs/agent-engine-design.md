@@ -131,7 +131,7 @@
 | 能力 `capabilities` | Agent 能做的事：工具、MCP、skill、子 agent、规划、与委托人沟通 | 准备、③ 行动 |
 | 工具箱 `toolbox` | 能力准备后得到的全部工具，以及它们怎么呈现给模型（哪些先露出，哪些按需展开） | ① 组装 |
 | 默认交付物 `deliverable` | 默认交什么、怎么验收、做不完时交什么；任务可以覆盖 | 交付 |
-| 模型偏好与要求 `model` | 偏好哪个模型；对视觉、最小上下文窗口等的要求；主模型调用的采样参数（temperature、topP） | 受理、② 推理 |
+| 模型偏好与要求 `model` | 偏好哪个模型；要求模型接收的模态（`requires.inputs`）、最小上下文窗口等；主模型调用的参数：采样参数（temperature、topP）与视图里保留原图的最近图片张数（`keepRecentImages`，§3.13） | 受理、① 组装、② 推理 |
 
 ### 1.5 任务
 
@@ -147,6 +147,10 @@
 | 守卫 `guards` | 这张工单的业务守卫，例如"档案版本变了就作废"，来源 `task:<id>` | ④ 观察、⑤ 反思 |
 | 预算 `budget` | 步数、时长、token、费用；不能超过执行环境的上限 | 受理、全程 |
 | 归属 `subject`、`tags` | 会话 id、档案 id（会话的一轮缺省为会话 id）；`retryOf` 等标签 | 查询、统计 |
+
+**图片与文件**：任务输入、易变信息、history 与 Agent 指令里的片段由文本、图片、文件组成，文件带 `mediaType`。mediaType 归为文本或一种**模态**（`modalityOf`）：`text/*`、JSON、XML、YAML 是文本，所有模型都接收；图片（`image/*`）、PDF、音频（`audio/*`）、视频（`video/*`）要模型声明了才发（§1.8）；归不了的类型不接受。`defineTask`、`defineAgent` 时校验：
+- 数据只能是字节、base64 或 base64 data URL，**不接受网址**：网址指向的内容会变，运行就没法重放；由 SDK 下载也等于让提供网址的一方决定引擎所在的机器去访问什么。需要网址时由应用下载后传入数据。
+- 单张图片不超过 5,242,880 字节，单个文件不超过 33,554,432 字节，一个定义里的图片与文件合计不超过 20 个（history 里工具结果的图片也算）。
 
 ### 1.6 运行
 
@@ -182,9 +186,10 @@
 
 受理时按顺序确定模型：`start` 时的指派 > Agent 的模型偏好 > 模型库的默认模型。
 
-解析出的模型必须满足两项要求：
-- Agent 的要求（视觉、最小上下文窗口等）；
-- 交付物的要求（结构化交付需要模型支持工具调用）。
+解析出的模型必须满足三项要求：
+- Agent 的要求（`requires.inputs` 列出的模态、最小上下文窗口等）；
+- 交付物的要求（结构化交付需要模型支持工具调用）；
+- 应用声明的输入用到的模态：Agent 指令、任务输入、易变信息、history（会话的一轮是窗口）里 user 消息的图片与文件，模态都要在模型的 `capabilities.inputs` 里。文本文件不算。运行中才出现的内容（工具结果、组件给的段）不在这里核对，由适配器换成一行说明（§8.1）。
 
 不满足时，运行以 `failed` / `model_unsuitable` 结束。实际使用的模型写入 `run_started`。
 
@@ -352,7 +357,7 @@ interface RunResult {
 依次检查：
 
 1. **Agent**：工具名不冲突，schema 能编译，能力 id 不重复（`defineAgent` 时已查过，这里核对指纹）。
-2. **任务**：history 里的工具调用成对；附件与模型能力匹配；预算不超过执行环境的上限；设了 `maxCost` 时，模型库里必须有该模型的价格。会话的一轮（§3.15）不能再给 history，接续点必须是同一会话里的一轮（`invalid_task`）；同一会话有运行中的轮时受理失败 `session_busy`（可重试）。
+2. **任务**：history 里的工具调用成对；图片与文件的模态在模型的输入能力里（§1.8）；预算不超过执行环境的上限；设了 `maxCost` 时，模型库里必须有该模型的价格。会话的一轮（§3.15）不能再给 history，接续点必须是同一会话里的一轮（`invalid_task`）；同一会话有运行中的轮时受理失败 `session_busy`（可重试）。
 3. **模型**：按 §1.8 解析并核对要求。
 4. **准入**：先受执行环境的并发运行上限约束，再按引擎的全局准入排队（§5.3）。
 
@@ -538,6 +543,7 @@ interface RunResult {
 ```
 
 - 须知对同一执行环境里的所有 Agent 都相同，可以在不同 Agent 之间共享缓存。
+- **截图老化**：Agent 设了 `model.settings.keepRecentImages`（N）时，history 与运行记录里工具结果的图片超过 N 张，从最早的开始从视图里省略，每次省略的张数是 N 的整数倍，视图里留 N 到 2N−1 张：成批省略，前缀缓存不会每一步都失效。只删图片、在那条工具结果末尾注明"[较早的图片 k 张已从视图省略，需要时重新调用工具]"，不删消息、不改顺序；运行记录不变。不设时不省略（命中缓存时重发旧图很便宜）。用户给的图片不老化。
 - 记忆只压缩 history 和运行记录，不碰任务输入。记忆只给出决定（前 `upTo` 条换成摘要），视图由引擎渲染（`renderView`）；压缩只改变视图，并且每一步都写进日志。
 
 ### 3.14 并发、取消与限额
@@ -959,7 +965,7 @@ type RunEvent = { seq: number; at: number } & (
 - **按消息存 blob**：`context_built` 只记录每条消息的 blob 引用，blob 按 sha256 去重。
 - **工具结果存两份**：`shown` 是模型实际看到的内容；`raw` 是原始输出，超过 1MB 时截断，并记录原始大小。结果里的图片以 base64 文本另存 blob（`images`），不脱敏：按文本模式替换会改坏图片数据，图片里的文字也匹配不到；图片里需要遮挡的内容由工具在返回前处理。这是下一条脱敏规则的例外。
 - **先脱敏再写入**：凭据引用解析出的值（8 位以上）、provider key 原值，以及 `sk-`、`Bearer` 等模式；先编码成 JSON 再脱敏的文本，也按凭据的 JSON 转义形式替换。blob 引用和 id、哈希、指纹字段不脱敏，避免破坏引用。
-- **任务内容**：`run_started.task.content` 引用任务输入与 history 的 blob，回归重放据此重建交付验收的语料；会话的一轮里 history 就是冻结的窗口，元数据（序号、接续点、轮起点、摘要、台账）在 `run_started.session`。
+- **任务内容**：`run_started.task.content` 引用任务输入与 history 的 blob，回归重放据此重建交付验收的语料。其中的图片与文件数据单独存 blob、不脱敏（与工具结果的图片相同），内容里只留 `{ $blob: 引用 }`，引用列在 `run_started.task.media`，保留清理据此判断它们仍被引用：会话每一轮都带着前文，同一张图因此只存一份；会话的一轮里 history 就是冻结的窗口，元数据（序号、接续点、轮起点、摘要、台账）在 `run_started.session`。
 - **格式版本**：`run_started.schemaVersion` 当前为 2（版本 2 起 `modelFingerprint` 与用量的 `tools` 分组成为必填）；读取版本 1 的日志时由升级器补上这两项。
 - **模型配置指纹**：`run_started.modelFingerprint` 是端口声明的调用参数（`ModelPort.settings`）的哈希，必填；平台改了某个模型的厂商参数或推理档位，前后运行的指纹不同。
 - **输出预留**：`run_started.outputReserve` 记下给输出留的 token（模型声明的输出上限，最多取窗口的一半），输入上限 = `contextLimit` − 它；两个字段都必填。
@@ -1072,10 +1078,11 @@ function modelHub(opts: {
   pricing?: PriceTable                        // 由应用提供；没有价格的模型，费用记为未知
 }): ModelHub
 
+type Modality = 'image' | 'pdf' | 'audio' | 'video'   // 文本以外、要模型声明了才发的输入（§1.5）；文本所有模型都接收
 interface ModelProvider { id: string; resolve(ref: ModelRef): ModelPort | undefined }
 interface ModelPort {
   ref: ModelRef
-  capabilities: { contextLimit: number; maxOutputTokens: number; vision: boolean; toolCalls: boolean;
+  capabilities: { contextLimit: number; maxOutputTokens: number; inputs: Modality[]; toolCalls: boolean;
                   reasoning: 'none' | 'optional' | 'forced'; systemAfterUser: boolean; parallelToolCalls: boolean }
   readonly settings?: unknown                 // 每次调用都带上的配置（可序列化），只用于模型配置指纹（§6.4）；凭据不放进来
   call(input: ModelInput, opts: { signal: AbortSignal; onDelta: (d: Delta) => void }): Promise<ModelResponse>
@@ -1109,9 +1116,9 @@ interface ModelResponse {
 | reasoning 参数 | Anthropic：thinking 预算 2048 / 4096 / 8192；OpenAI：`reasoningEffort`，并开启 `parallelToolCalls`；Google：`thinkingConfig`，关闭时为 0；Ollama：`think`。强制开启 thinking 的模型，只有用户选择关闭时才注入关闭参数。SDK 会过滤的厂商私有参数在 fetch 层注入 |
 | 采样参数 | `ModelInput` 带 `temperature`、`topP` 时原样传给 `streamText`，不带时不发 |
 | 端口参数 | `settings` 为厂商、推理档位、是否丢弃历史推理、`providerOptions`、顶层 `reasoning` 与排好序的 header 名；header 值可能是凭据，不计入 |
-| 工具结果的图片 | 模型支持视觉（`capabilities.vision`）时，按模型实例的 `provider` 分两种发法。`anthropic.messages`、`openai.responses`、`google.generative-ai` 的厂商包能把工具结果里的图片作为图片发出：带图片的工具结果发成内容（文本 + 图片文件）。其他厂商包（OpenAI Chat、OpenAI 兼容接口等）会把它序列化成 base64 文本，模型看不到图，token 还会暴涨：工具结果只发文本，末尾注明"[图片 N 张：见下一条消息]"，图片放进这批工具结果之后的一条 user 消息，开头注明来自哪个工具的哪次调用、不是用户发送的。工具结果必须紧跟发起调用的 assistant 消息，所以整批结束才发这条消息；缓存断点落在它上面。名单按 AI SDK 7 各厂商包的源码核对，不在名单里的都走第二种，任何厂商都看得到图。不支持视觉时发文本，末尾加一行"[图片 N 张：模型不支持视觉，未展示]" |
+| 工具结果的图片 | 模型接收图片（`capabilities.inputs` 含 `image`）时，按模型实例的 `provider` 分两种发法。`anthropic.messages`、`openai.responses`、`google.generative-ai` 的厂商包能把工具结果里的图片作为图片发出：带图片的工具结果发成内容（文本 + 图片文件）。其他厂商包（OpenAI Chat、OpenAI 兼容接口等）会把它序列化成 base64 文本，模型看不到图，token 还会暴涨：工具结果只发文本，末尾注明"[图片 N 张：见下一条消息]"，图片放进这批工具结果之后的一条 user 消息，开头注明来自哪个工具的哪次调用、不是用户发送的。工具结果必须紧跟发起调用的 assistant 消息，所以整批结束才发这条消息；缓存断点落在它上面。名单按 AI SDK 7 各厂商包的源码核对，不在名单里的都走第二种，任何厂商都看得到图。不接收图片时发文本，末尾加一行"[图片 N 张：模型不支持图片输入，未展示]" |
 | 应用调用参数 | 应用为模型声明的 `callSettings`：`providerOptions` 按厂商键与上面的 reasoning 参数逐字段合并，同一字段应用优先（具体的厂商参数优先于通用的推理档位，与 AI SDK 一致）；`headers` 与 AI SDK 的顶层 `reasoning` 原样传入。参数随模型配置固定。顶层 `reasoning` 与上面的 reasoning 参数是同一件事的两个通用开关，只能给一个，两个都给时创建提供方即报错 |
-| 消息规整 | `systemAfterUser=false` 的厂商：把 user 之后的 system 消息改写成带固定标记的 user 内容。用户消息里的图片发成 file 片段（AI SDK 7 已弃用 image 片段），没给类型时写 `image`，由 SDK 按字节识别格式。清洗泄漏的工具调用标记 |
+| 消息规整 | `systemAfterUser=false` 的厂商：把 user 之后的 system 消息改写成带固定标记的 user 内容。用户消息里的图片发成 file 片段（AI SDK 7 已弃用 image 片段），没给类型时写 `image`，由 SDK 按字节识别格式。文本文件转成文字（"[文件 名称（类型）]"后接正文），所有模型都读得了；模型不接收的模态换成一行说明（"[文件 名称（类型）：模型不支持 pdf 输入，未发送]"、"[图片：模型不支持图片输入，未发送]"），受理已拦下应用声明的输入，走到这里的是运行中才出现的内容。清洗泄漏的工具调用标记 |
 | 推理回放 | 推理内容和签名原样带回；某个模型不能稳定接受带签名的回放时，适配器可以配置为丢弃历史推理内容 |
 | 工具选择 | 只在兜底交付时用 `toolChoice = 'none'`，工具定义照常传入；厂商不支持时忽略返回的工具调用 |
 | 缓存断点 | 仅 Anthropic，ephemeral（5 分钟）：打在稳定前缀末尾（能力说明之后）和运行记录末尾，两处重合时只打一个 |

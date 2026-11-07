@@ -4,7 +4,7 @@ import type { Check, Memory } from '../contracts/component.js'
 import type { RunEvent } from '../contracts/events.js'
 import type { ModelCapabilities, ModelInput } from '../contracts/model.js'
 import type { Run } from '../contracts/run.js'
-import { canonicalJson, parseCanonical } from '../core/definition/hash.js'
+import { canonicalJson, parseCanonical, sha256Hex } from '../core/definition/hash.js'
 import { regressionReplay } from './replay.js'
 import { summaryMessage } from '../core/run/layout.js'
 import { memoryArchive } from '../services/memory-archive.js'
@@ -327,9 +327,7 @@ describe('sessions', () => {
     const h = setup(
       [{ text: '看到了' }, { text: '还是那张图' }, { text: '同一张' }],
       passMemory(),
-      {
-        vision: true,
-      },
+      { inputs: ['image'] },
     )
     const image = new Uint8Array([137, 80, 78, 71])
     const picture = taskOf({
@@ -365,6 +363,43 @@ describe('sessions', () => {
     const started = await h.started(third.runId)
     const content = parseCanonical((await h.archive.getBlob(started.task.content)) as string)
     expect(JSON.stringify(content)).not.toContain('$bytes')
+  })
+
+  it('AC-012 stores an image once however many turns carry it', async () => {
+    const h = setup([{ text: '看到了' }, { text: '又看到了' }], passMemory(), {
+      inputs: ['image'],
+    })
+    const png = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]).toString('base64')
+    const withImage = (text: string) =>
+      taskOf({
+        input: [
+          {
+            role: 'user',
+            parts: [
+              { type: 'text', text },
+              { type: 'image', image: png, mediaType: 'image/png' },
+            ],
+          },
+        ],
+      })
+    const first = h.env.start(agent, withImage('看这张图'), { session: 's' })
+    await first.result
+    const second = h.env.start(agent, withImage('还是这张'), { session: 's' })
+    await second.result
+    const ref = `sha256:${sha256Hex(png)}`
+    for (const runId of [first.runId, second.runId]) {
+      const started = await h.started(runId)
+      expect(started.task.media).toEqual([ref])
+      expect(await h.archive.getBlob(started.task.content)).not.toContain(png)
+    }
+    expect(await h.archive.getBlob(ref)).toBe(png)
+    const images = h.model.inputs[1]!.messages.flatMap((m) =>
+      Array.isArray(m.content)
+        ? (m.content as Array<{ type: string; image?: unknown }>).filter((p) => p.type === 'image')
+        : [],
+    )
+    expect(images.map((p) => p.image)).toEqual([png, png])
+    expect(await sessionLogIssues(h.archive, 's')).toEqual([])
   })
 
   it('AC-011 refuses a steer on a turn that the busy session turns away', async () => {

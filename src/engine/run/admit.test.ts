@@ -9,8 +9,8 @@ const port = (model: string, capabilities: Partial<ModelCapabilities> = {}) =>
   fakeModel({ model, replies: [], capabilities }).port
 
 const main = port('main')
-const small = port('small', { contextLimit: 8000, vision: false, toolCalls: false })
-const seeing = port('seeing', { vision: true })
+const small = port('small', { contextLimit: 8000, inputs: [], toolCalls: false })
+const seeing = port('seeing', { inputs: ['image'] })
 
 const input = (patch: Partial<AdmitInput> = {}): AdmitInput => ({
   agent: agentOf(),
@@ -39,9 +39,12 @@ describe('admit', () => {
     ['no model at all', { hub: hubOf([main]) }, '没有可用的模型'],
     ['unknown reference', { assignment: { model: 'fake:nope' } }, '模型 fake:nope 不存在'],
     [
-      'vision required',
-      { agent: agentOf({ model: { requires: { vision: true } } }) },
-      '不支持视觉',
+      'a modality required',
+      {
+        agent: agentOf({ model: { requires: { inputs: ['image', 'pdf'] } } }),
+        assignment: { model: 'fake:seeing' },
+      },
+      '模型 fake:seeing 不支持 pdf 输入',
     ],
     [
       'context too small',
@@ -79,15 +82,61 @@ describe('admit', () => {
           input: [{ role: 'user', parts: [{ type: 'image', image: 'data:image/png;base64,AA' }] }],
         }),
       },
-      '图片',
+      '任务含 image 输入，模型 fake:main 不支持',
     ],
-  ] as const)('AC-002 model_unsuitable: %s', (_name, patch, message) => {
+    [
+      'PDF and audio on an image model',
+      {
+        task: taskOf({
+          input: [
+            {
+              role: 'user',
+              parts: [
+                { type: 'file', data: 'AA==', mediaType: 'audio/mpeg' },
+                { type: 'file', data: 'AA==', mediaType: 'application/pdf' },
+              ],
+            },
+          ],
+        }),
+        assignment: { model: 'fake:seeing' },
+      },
+      '任务含 pdf、audio 输入，模型 fake:seeing 不支持',
+    ],
+    [
+      'an image in the agent instructions',
+      {
+        agent: agentOf({
+          instructions: [{ role: 'system', parts: [{ type: 'image', image: 'AA==' }] }],
+        }),
+      },
+      '任务含 image 输入',
+    ],
+  ] as const)('AC-002 AC-005 model_unsuitable: %s', (_name, patch, message) => {
     const r = admit(input(patch as Partial<AdmitInput>))
     expect(r).toMatchObject({ ok: false, code: 'model_unsuitable' })
     expect(!r.ok && r.message).toContain(message)
   })
 
-  it('AC-002 accepts images on a vision model', () => {
+  it('AC-005 accepts text files on any model and images on an image model', () => {
+    const task = taskOf({
+      input: [
+        {
+          role: 'user',
+          parts: [
+            { type: 'file', data: 'e30=', mediaType: 'application/json', filename: 'a.json' },
+            { type: 'image', image: 'AA==' },
+          ],
+        },
+      ],
+    })
+    expect(admit(input({ task, assignment: { model: 'fake:seeing' } })).ok).toBe(true)
+    const text = taskOf({
+      input: [{ role: 'user', parts: [{ type: 'file', data: 'e30=', mediaType: 'text/plain' }] }],
+    })
+    expect(admit(input({ task: text, assignment: { model: 'fake:small' } })).ok).toBe(true)
+  })
+
+  it('AC-005 accepts images in history on an image model', () => {
     const task = taskOf({
       history: [{ role: 'user', content: [{ type: 'image', image: 'data:image/png;base64,AA' }] }],
     })

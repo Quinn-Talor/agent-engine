@@ -12,6 +12,7 @@ import type {
 } from '../contracts/events.js'
 import type { RunSummary } from '../contracts/run.js'
 import { canonicalJson, parseCanonical } from '../core/definition/hash.js'
+import { contentMediaRefs, unpackContent, type MediaData } from '../core/log/task-content.js'
 import {
   appendLedger,
   blobsForCarry,
@@ -67,10 +68,10 @@ async function loadTurn(archive: ArchiveStore, runId: string, upTo?: number): Pr
   if (!started?.session) {
     throw new Error(`会话日志：运行 ${runId} 不是会话的一轮`)
   }
-  const content = parseCanonical(textOf(await archive.getBlob(started.task.content))) as {
-    input: Segment[]
-    history: SessionWindow['messages']
-  }
+  const stored = parseCanonical(textOf(await archive.getBlob(started.task.content)))
+  const media = new Map<BlobRef, MediaData>()
+  for (const ref of contentMediaRefs(stored)) media.set(ref, await archive.getBlob(ref))
+  const content = unpackContent(stored, media)
   const { window } = started.session
   const summary =
     window.summary !== undefined ? textOf(await archive.getBlob(window.summary)) : undefined

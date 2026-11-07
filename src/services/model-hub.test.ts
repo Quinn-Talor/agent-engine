@@ -14,7 +14,7 @@ import { modelHub, type ModelHubOptions } from './model-hub.js'
 const caps: ModelCapabilities = {
   contextLimit: 1000,
   maxOutputTokens: 100,
-  vision: false,
+  inputs: [],
   toolCalls: true,
   reasoning: 'none',
   systemAfterUser: true,

@@ -154,6 +154,44 @@ describe('compactingMemory', () => {
     expect(serialized).toContain('结果 search: out c1')
   })
 
+  it('AC-010 renders images and files with where they came from', async () => {
+    const { ctx, requests } = setup(['summary'])
+    const memory = compactingMemory({ keepRecentTokens: 300 }).start(runInfo(), ctx)
+    const media: ModelMessage[] = [
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: '看看这些' },
+          { type: 'image', image: 'AQID' },
+          { type: 'file', data: 'JVBER', mediaType: 'application/pdf', filename: 'c.pdf' },
+        ],
+      },
+      {
+        role: 'assistant',
+        content: [{ type: 'tool-call', toolCallId: 'c1', toolName: 'shot', input: {} }],
+      },
+      {
+        role: 'tool',
+        content: [
+          {
+            type: 'tool-result',
+            toolCallId: 'c1',
+            toolName: 'shot',
+            output: '截好了',
+            images: [
+              { type: 'image', image: 'AQID' },
+              { type: 'image', image: 'BAUG' },
+            ],
+          },
+        ],
+      },
+    ]
+    await memory.recall(memoryState({ history: media }))
+    const serialized = requests[0]!.messages[0]!.content as string
+    expect(serialized).toContain('user: 看看这些\n[图片]\n[文件 c.pdf（application/pdf）]')
+    expect(serialized).toContain('结果 shot: 截好了\n[工具 shot（调用 c1）返回的图片 2 张]')
+  })
+
   it('AC-012 measures the trigger against the available space', async () => {
     const { ctx, requests } = setup(['s'])
     const memory = compactingMemory({ trigger: 0.8 }).start(runInfo(), ctx)

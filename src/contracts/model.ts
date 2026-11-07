@@ -7,9 +7,13 @@ import type { ModelErrorCode } from './errors.js'
 /** 模型引用，格式 `<提供方 id>:<模型 id>`；模型库按冒号前缀分派提供方。 */
 export type ModelRef = string
 
+/** 文本以外、要模型声明了才发的输入模态（设计 §1.8）。文本所有模型都接收。 */
+export type Modality = 'image' | 'pdf' | 'audio' | 'video'
+
 /** Agent 对模型的要求（设计 §1.8）。 */
 export interface ModelRequirements {
-  vision?: boolean
+  /** 模型必须接收的模态。 */
+  inputs?: Modality[]
   minContext?: number
   toolCalls?: boolean
   reasoning?: boolean
@@ -18,7 +22,8 @@ export interface ModelRequirements {
 export interface ModelCapabilities {
   contextLimit: number
   maxOutputTokens: number
-  vision: boolean
+  /** 模型接收的模态；文本不用写，所有模型都接收。 */
+  inputs: Modality[]
   toolCalls: boolean
   reasoning: 'none' | 'optional' | 'forced'
   systemAfterUser: boolean
@@ -46,12 +51,17 @@ export interface ModelInput {
   topP?: number
 }
 
-/** Agent 给主模型调用定的采样参数（设计 §1.4）；推理档位等厂商参数在模型配置里。 */
+/** Agent 给主模型调用定的参数（设计 §1.4）：采样参数与视图里保留的图片张数；推理档位等厂商参数在模型配置里。 */
 export interface ModelSettings {
   /** 0 到 2。 */
   temperature?: number
   /** 大于 0、不超过 1。 */
   topP?: number
+  /**
+   * 视图里保留原图的工具结果图片张数（≥ 1 的整数）；更早的图片从视图里省略，运行记录不变。
+   * 不设时不省略。截图很多的 Agent 用它控制每轮的费用（设计 §3.13）。
+   */
+  keepRecentImages?: number
 }
 
 export type Delta = { type: 'text'; text: string } | { type: 'reasoning'; text: string }

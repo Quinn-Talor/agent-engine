@@ -24,7 +24,7 @@ import { normalizeUsage } from './usage.js'
 const DEFAULT_MAX_RETRIES = 2
 const DEFAULT_CAPABILITIES: Omit<ModelCapabilities, 'contextLimit'> = {
   maxOutputTokens: 8192,
-  vision: false,
+  inputs: [],
   toolCalls: true,
   reasoning: 'none',
   systemAfterUser: true,
@@ -135,7 +135,7 @@ function createPort(
         dropReasoning: config.dropReasoningHistory === true,
         ...(input.cacheBreakpoints ? { cacheBreakpoints: input.cacheBreakpoints } : {}),
         anthropic: vendor === 'anthropic',
-        vision: capabilities.vision,
+        inputs: capabilities.inputs,
         provider: config.model.provider,
       }),
       ...(input.tools.length > 0

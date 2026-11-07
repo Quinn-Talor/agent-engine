@@ -2,10 +2,18 @@
 // 校验收集全部问题后一次性报告（BR-002）。
 
 import type { Agent, AgentDef, Deliverable } from '../../contracts/agent.js'
-import type { ModelMessage, Segment } from '../../contracts/common.js'
+import type { FilePart, ImagePart, ModelMessage, Segment } from '../../contracts/common.js'
 import type { Guard } from '../../contracts/component.js'
 import { DefinitionError } from '../../contracts/errors.js'
 import type { Task, TaskDef } from '../../contracts/task.js'
+import { mediaByteLength } from '../run/media-tokens.js'
+import {
+  MAX_FILE_BYTES,
+  MAX_IMAGE_BYTES,
+  MAX_MEDIA_PARTS,
+  MODALITIES,
+  modalityOf,
+} from '../run/modality.js'
 import { agentFingerprint, taskFingerprint } from './fingerprint.js'
 import { freezeList, frozenCopy } from './freeze.js'
 import { canonicalJson } from './hash.js'
@@ -17,6 +25,9 @@ const PART_TYPES = new Set(['text', 'image', 'file'])
 const MESSAGE_ROLES = new Set(['system', 'user', 'assistant', 'tool'])
 const OUTPUT_KINDS = new Set(['text', 'structured'])
 const CHECK_MODES = new Set(['gate', 'annotate', 'shadow'])
+const BASE64 = /^[A-Za-z0-9+/=\s]+$/
+const BASE64_DATA_URL = /^data:[^,]*;base64,/i
+const URL_SCHEME = /^[a-z][a-z0-9+.-]*:/i
 
 type Issues = string[]
 
@@ -61,7 +72,64 @@ function requireFields(
   return true
 }
 
-function checkSegments(segments: unknown, label: string, issues: Issues): void {
+/** 一个定义里已数到的图片与文件个数。 */
+type MediaCount = { n: number }
+
+/**
+ * 媒体数据只能是字节、base64 或 base64 data URL（BR-001）：网址指向的内容会变，运行就没法重放；
+ * 由 SDK 下载也等于让提供网址的一方决定引擎所在的机器去访问什么。
+ */
+function dataIssue(data: unknown): string | undefined {
+  if (data instanceof Uint8Array) return undefined
+  if (typeof data !== 'string') return '数据必须是字节、base64 或 base64 data URL'
+  if (data.startsWith('data:')) {
+    if (!BASE64_DATA_URL.test(data)) return 'data URL 必须是 base64 形式'
+    const payload = data.slice(data.indexOf(',') + 1)
+    return payload.length > 0 && BASE64.test(payload) ? undefined : '数据不是 base64'
+  }
+  if (URL_SCHEME.test(data)) return '不接受网址：请由应用下载后传入数据'
+  return data.length > 0 && BASE64.test(data) ? undefined : '数据不是 base64'
+}
+
+/** 一个图片或文件片段：数据形式、类型与大小（BR-001、BR-002）。 */
+function checkMedia(part: ImagePart | FilePart, at: string, issues: Issues, count: MediaCount) {
+  count.n += 1
+  const data: unknown = part.type === 'image' ? part.image : part.data
+  const problem = dataIssue(data)
+  if (problem) issues.push(`${at} ${problem}`)
+  let image = true
+  if (part.type === 'image') {
+    const type: unknown = part.mediaType
+    if (type !== undefined && (typeof type !== 'string' || modalityOf(type) !== 'image')) {
+      issues.push(`${at} 图片的类型 ${String(type)} 不是图片`)
+    }
+  } else if (!isNonEmptyString(part.mediaType)) {
+    issues.push(`${at} 文件缺少 mediaType`)
+    return
+  } else {
+    const modality = modalityOf(part.mediaType)
+    if (modality === undefined) {
+      issues.push(`${at} 不支持的文件类型 ${part.mediaType}`)
+      return
+    }
+    image = modality === 'image'
+  }
+  if (problem) return
+  const bytes = mediaByteLength(data as string | Uint8Array) ?? 0
+  if (image && bytes > MAX_IMAGE_BYTES) {
+    issues.push(`${at} 图片过大：${bytes} 字节，上限 ${MAX_IMAGE_BYTES}`)
+  } else if (!image && bytes > MAX_FILE_BYTES) {
+    issues.push(`${at} 文件过大：${bytes} 字节，上限 ${MAX_FILE_BYTES}`)
+  }
+}
+
+function checkMediaCount(count: MediaCount, issues: Issues): void {
+  if (count.n > MAX_MEDIA_PARTS) {
+    issues.push(`图片与文件合计 ${count.n} 个，上限 ${MAX_MEDIA_PARTS}`)
+  }
+}
+
+function checkSegments(segments: unknown, label: string, issues: Issues, count: MediaCount): void {
   if (!Array.isArray(segments)) {
     issues.push(`${label} 必须是数组`)
     return
@@ -80,8 +148,10 @@ function checkSegments(segments: unknown, label: string, issues: Issues): void {
     seg.parts.forEach((part, j) => {
       if (!isObject(part) || !PART_TYPES.has(part.type)) {
         issues.push(`${at}.parts[${j}] 类型不合法`)
-      } else if (part.type === 'text' && typeof part.text !== 'string') {
-        issues.push(`${at}.parts[${j}] text 必须是字符串`)
+      } else if (part.type === 'text') {
+        if (typeof part.text !== 'string') issues.push(`${at}.parts[${j}] text 必须是字符串`)
+      } else {
+        checkMedia(part, `${at}.parts[${j}]`, issues, count)
       }
     })
   })
@@ -154,7 +224,9 @@ export function defineAgent(def: AgentDef): Agent {
   if (!Array.isArray(def.instructions) || def.instructions.length === 0) {
     issues.push('instructions 不能为空')
   } else {
-    checkSegments(def.instructions, 'instructions', issues)
+    const media = { n: 0 }
+    checkSegments(def.instructions, 'instructions', issues, media)
+    checkMediaCount(media, issues)
   }
   const capabilities = def.capabilities ?? []
   capabilities.forEach((c, i) =>
@@ -189,6 +261,17 @@ export function defineAgent(def: AgentDef): Agent {
   const minContext = def.model?.requires?.minContext
   if (minContext !== undefined && !isInteger(minContext, 1)) {
     issues.push('model.requires.minContext 必须是正整数')
+  }
+  const inputs: unknown = def.model?.requires?.inputs
+  if (inputs !== undefined) {
+    const unknown = Array.isArray(inputs)
+      ? inputs.filter((m) => !(MODALITIES as readonly unknown[]).includes(m))
+      : [inputs]
+    for (const m of unknown) issues.push(`model.requires.inputs 含未知模态 ${String(m)}`)
+  }
+  const keepRecentImages = def.model?.settings?.keepRecentImages
+  if (keepRecentImages !== undefined && !isInteger(keepRecentImages, 1)) {
+    issues.push('model.settings.keepRecentImages 必须是 ≥ 1 的整数')
   }
   const temperature = def.model?.settings?.temperature
   if (
@@ -227,7 +310,7 @@ export function defineAgent(def: AgentDef): Agent {
 const frozenDeliverable = (d: Deliverable): Deliverable =>
   Object.freeze({ ...d, ...(d.checks ? { checks: freezeList(d.checks) } : {}) })
 
-function checkHistory(history: ModelMessage[], issues: Issues): void {
+function checkHistory(history: ModelMessage[], issues: Issues, count: MediaCount): void {
   let pending = new Set<string>()
   const flush = () => {
     if (pending.size > 0) issues.push(`工具调用 ${[...pending].join(', ')} 缺少结果`)
@@ -237,6 +320,20 @@ function checkHistory(history: ModelMessage[], issues: Issues): void {
     if (!isObject(message) || !MESSAGE_ROLES.has(message.role)) {
       issues.push(`history[${i}] role 不合法`)
       return
+    }
+    if (message.role === 'user' && Array.isArray(message.content)) {
+      message.content.forEach((part, j) => {
+        if (isObject(part) && (part.type === 'image' || part.type === 'file')) {
+          checkMedia(part, `history[${i}].content[${j}]`, issues, count)
+        }
+      })
+    }
+    if (message.role === 'tool' && Array.isArray(message.content)) {
+      message.content.forEach((part, j) =>
+        (part.images ?? []).forEach((image, k) =>
+          checkMedia(image, `history[${i}].content[${j}].images[${k}]`, issues, count),
+        ),
+      )
     }
     if (message.role === 'assistant' && Array.isArray(message.content)) {
       flush()
@@ -314,13 +411,15 @@ export function checkGuards(guards: readonly Guard[], issues: Issues): void {
 
 export function defineTask(def: TaskDef): Task {
   const issues: Issues = []
+  const media = { n: 0 }
   if (!Array.isArray(def.input) || def.input.length === 0) {
     issues.push('input 不能为空')
   } else {
-    checkSegments(def.input, 'input', issues)
+    checkSegments(def.input, 'input', issues, media)
   }
-  if (def.history !== undefined) checkHistory(def.history, issues)
-  if (def.volatile !== undefined) checkSegments(def.volatile, 'volatile', issues)
+  if (def.history !== undefined) checkHistory(def.history, issues, media)
+  if (def.volatile !== undefined) checkSegments(def.volatile, 'volatile', issues, media)
+  checkMediaCount(media, issues)
   const workspace = def.scope?.workspace
   if (
     workspace !== undefined &&

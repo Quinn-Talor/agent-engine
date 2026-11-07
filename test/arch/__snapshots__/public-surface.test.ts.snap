@@ -90,6 +90,7 @@ exports[`public surface > records every entry point’s runtime exports 1`] = `
   "agent-engine/sdk (beyond the app API)": [
     "AdmissionTimeoutError",
     "DEFAULT_BUDGET",
+    "MODALITIES",
     "REDACTED",
     "addUsage",
     "agentFingerprint",
@@ -118,6 +119,7 @@ exports[`public surface > records every entry point’s runtime exports 1`] = `
     "inputHash",
     "layout",
     "memoryViewIssue",
+    "modalityOf",
     "nextCalibration",
     "nextStage",
     "permitResultIssue",

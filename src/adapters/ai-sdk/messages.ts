@@ -1,10 +1,12 @@
 // 消息规整与推理回放（设计 §8.1）：视图消息 → AI SDK 消息。systemAfterUser=false 的厂商把 user 之后的
 // system 改写成带固定标记的 user 内容；推理内容、签名和工具调用的厂商元数据原样带回（可配置为丢弃历史推理）；
 // 仅 Anthropic 在断点所在消息上打 ephemeral 缓存标记；工具结果里的图片，厂商包不能作为图片发出时改放进
-// 这批工具结果之后的一条 user 消息；清洗回复里泄漏的工具调用标记。
+// 这批工具结果之后的一条 user 消息；文本文件转成文字，模型不接收的模态换成一行说明（设计 §8.1）；
+// 清洗回复里泄漏的工具调用标记。
 
 import type { ModelMessage as SdkModelMessage } from 'ai'
-import type { ModelMessage } from '../../sdk.js'
+import { modalityOf } from '../../sdk.js'
+import type { Modality, ModelMessage } from '../../sdk.js'
 
 type SdkAssistantPart = Exclude<
   Extract<SdkModelMessage, { role: 'assistant' }>['content'],
@@ -52,10 +54,9 @@ function reasoningParts(text: string, providerData: unknown): SdkAssistantPart[]
 }
 
 type ToolResult = Extract<ModelMessage, { role: 'tool' }>['content'][number]
-type ImagePart = Extract<
-  Exclude<Extract<ModelMessage, { role: 'user' }>['content'], string>[number],
-  { type: 'image' }
->
+type UserPart = Exclude<Extract<ModelMessage, { role: 'user' }>['content'], string>[number]
+type ImagePart = Extract<UserPart, { type: 'image' }>
+type FilePart = Extract<UserPart, { type: 'file' }>
 type SdkUserPart = Exclude<Extract<SdkModelMessage, { role: 'user' }>['content'], string>[number]
 
 // 能把工具结果里的图片作为图片发给模型的厂商包（按 AI SDK 7 各厂商包的源码核对）。其他厂商包会把图片
@@ -66,7 +67,7 @@ const TOOL_RESULT_IMAGES = new Set([
   'google.generative-ai',
 ])
 
-/** 工具结果里的图片怎么发：随结果发出、放进下一条消息，或不支持视觉时略去。 */
+/** 工具结果里的图片怎么发：随结果发出、放进下一条消息，或模型不接收图片时略去。 */
 type ToolImages = 'inline' | 'next' | 'omit'
 
 // AI SDK 7 已弃用 image 片段：图片用 file 片段发出，没给类型时写 image，由 SDK 按字节识别具体格式。
@@ -83,7 +84,7 @@ function toolOutput(r: ToolResult, images: ToolImages) {
   const list = r.images ?? []
   if (list.length === 0) return { type: 'text' as const, value: r.output }
   if (images !== 'inline') {
-    const note = images === 'next' ? '见下一条消息' : '模型不支持视觉，未展示'
+    const note = images === 'next' ? '见下一条消息' : '模型不支持图片输入，未展示'
     return { type: 'text' as const, value: `${r.output}\n[图片 ${list.length} 张：${note}]` }
   }
   return {
@@ -111,9 +112,51 @@ function nextImages(r: ToolResult): SdkUserPart[] {
   ]
 }
 
+/** 文本文件的正文：字节、base64 或 data URL。 */
+function textOf(data: string | Uint8Array): string {
+  if (typeof data !== 'string') return new TextDecoder().decode(data)
+  if (!data.startsWith('data:')) return Buffer.from(data, 'base64').toString('utf8')
+  const comma = data.indexOf(',')
+  const payload = data.slice(comma + 1)
+  return data.slice(0, comma).endsWith(';base64')
+    ? Buffer.from(payload, 'base64').toString('utf8')
+    : decodeURIComponent(payload)
+}
+
+/**
+ * user 片段：文本文件转成文字（所有模型都读得了文字）；图片、PDF、音视频只发给接收该模态的模型，否则换成
+ * 一行说明。受理已拦下应用声明的输入，走到说明的是运行中才出现的内容（例如组件给的段）。
+ */
+function userPart(p: UserPart, inputs: readonly Modality[]): SdkUserPart {
+  if (p.type === 'text') return { type: 'text', text: p.text }
+  if (p.type === 'image') {
+    return inputs.includes('image')
+      ? imagePart(p)
+      : { type: 'text', text: '[图片：模型不支持图片输入，未发送]' }
+  }
+  const file: FilePart = p
+  const label = `文件 ${file.filename ?? '未命名'}（${file.mediaType}）`
+  const modality = modalityOf(file.mediaType)
+  if (modality === 'text') return { type: 'text', text: `[${label}]\n${textOf(file.data)}` }
+  if (modality !== undefined && inputs.includes(modality)) {
+    return {
+      type: 'file',
+      data: file.data,
+      mediaType: file.mediaType,
+      ...(file.filename ? { filename: file.filename } : {}),
+    }
+  }
+  return { type: 'text', text: `[${label}：模型不支持 ${modality ?? file.mediaType} 输入，未发送]` }
+}
+
 function convert(
   m: ModelMessage,
-  opts: { rewriteSystem: boolean; dropReasoning: boolean; images: ToolImages },
+  opts: {
+    rewriteSystem: boolean
+    dropReasoning: boolean
+    images: ToolImages
+    inputs: readonly Modality[]
+  },
 ): SdkModelMessage {
   switch (m.role) {
     case 'system':
@@ -122,19 +165,7 @@ function convert(
         : { role: 'system', content: m.content }
     case 'user':
       if (typeof m.content === 'string') return { role: 'user', content: m.content }
-      return {
-        role: 'user',
-        content: m.content.map((p) => {
-          if (p.type === 'text') return { type: 'text' as const, text: p.text }
-          if (p.type === 'image') return imagePart(p)
-          return {
-            type: 'file' as const,
-            data: p.data,
-            mediaType: p.mediaType,
-            ...(p.filename ? { filename: p.filename } : {}),
-          }
-        }),
-      }
+      return { role: 'user', content: m.content.map((p) => userPart(p, opts.inputs)) }
     case 'assistant': {
       if (typeof m.content === 'string') return { role: 'assistant', content: m.content }
       const content: SdkAssistantPart[] = []
@@ -176,14 +207,14 @@ export function toSdkMessages(
     dropReasoning: boolean
     cacheBreakpoints?: number[]
     anthropic: boolean
-    /** 模型支持视觉：工具结果里的图片作为图片发出；不支持时换成一行说明。 */
-    vision: boolean
+    /** 模型接收的模态：决定图片、文件发不发，以及工具结果里的图片怎么发。 */
+    inputs: readonly Modality[]
     /** AI SDK 模型实例的 provider（例如 openai.chat），决定工具结果里的图片放在哪。 */
     provider: string
   },
 ): SdkModelMessage[] {
   const breakpoints = new Set(opts.anthropic ? (opts.cacheBreakpoints ?? []) : [])
-  const images: ToolImages = !opts.vision
+  const images: ToolImages = !opts.inputs.includes('image')
     ? 'omit'
     : TOOL_RESULT_IMAGES.has(opts.provider)
       ? 'inline'
@@ -197,6 +228,7 @@ export function toSdkMessages(
         rewriteSystem: m.role === 'system' && !opts.systemAfterUser && seenUser,
         dropReasoning: opts.dropReasoning,
         images,
+        inputs: opts.inputs,
       }),
     )
     if (m.role === 'user') seenUser = true

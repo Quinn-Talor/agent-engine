@@ -250,7 +250,7 @@ describe('sessions end to end', () => {
         { text: '页面正常' },
         { text: '和上次一样' },
       ],
-      capabilities: { contextLimit: 100_000, maxOutputTokens: 1_000, vision: true },
+      capabilities: { contextLimit: 100_000, maxOutputTokens: 1_000, inputs: ['image'] },
     })
     const archive = memoryArchive()
     const engine = createEngine({

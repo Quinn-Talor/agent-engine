@@ -36,8 +36,13 @@ export interface TaskSnapshot {
   budget?: Budget
   /** 任务目标（≤ 200 字）；回归重放据此重算纠偏消息。 */
   goal?: string
-  /** 任务输入与 history 的 blob（`{ input, history }`，规范 JSON）；回归重放据此重建交付验收的语料。 */
+  /**
+   * 任务输入与 history 的 blob（`{ input, history }`，规范 JSON）；回归重放据此重建交付验收的语料。
+   * 其中的图片与文件数据单独存 blob，内容里只留 `{ $blob: 引用 }`（设计 §6.2）。
+   */
   content: BlobRef
+  /** 内容引用的图片与文件 blob（去重、按首次出现的顺序）：保留清理据此判断它们仍被引用。 */
+  media?: BlobRef[]
 }
 
 /** 轮开始时压缩（A）、轮中压缩（B）、超限时引擎丢掉最早的整轮（C）。 */

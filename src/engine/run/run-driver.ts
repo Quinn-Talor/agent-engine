@@ -41,6 +41,7 @@ import { estimateMessages, outputReserveOf } from '../../core/run/estimate.js'
 import { CARRY_VERSION, ledgerSegment } from '../../core/session/window.js'
 import { layout } from '../../core/run/layout.js'
 import { buildCorpus, sideEffects } from '../../core/log/projections.js'
+import { contentMedia, packContent } from '../../core/log/task-content.js'
 import { apply, initial, nextStage, type RunState } from '../../core/run/state.js'
 import { act } from '../../executor/act/act.js'
 import { createComposer, type Composer } from '../../executor/compose/compose.js'
@@ -414,6 +415,11 @@ export function startRun(
       }
       const p = r.prepared
       releases.push(...p.releases)
+      // 图片与文件单独存、不脱敏（与工具结果的图片相同），内容里只留引用：会话每轮带着前文，同一张图只存一份。
+      const content = { input: task.input, history }
+      const media: BlobRef[] = []
+      for (const data of contentMedia(content)) media.push(await archive.putBlob(data))
+      const mediaRefs = [...new Set(media)]
       const started: RunEventBody = {
         t: 'run_started',
         agent: {
@@ -429,7 +435,8 @@ export function startRun(
           ...(task.context !== undefined ? { context: task.context } : {}),
           budget: a.budget,
           ...(goal ? { goal } : {}),
-          content: await putBlob(canonicalJson({ input: task.input, history })),
+          content: await putBlob(packContent(content, media)),
+          ...(mediaRefs.length > 0 ? { media: mediaRefs } : {}),
         },
         environment: {
           name: env.config.name,

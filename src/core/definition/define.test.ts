@@ -262,3 +262,121 @@ describe('defineTask', () => {
     }
   })
 })
+
+describe('media in definitions', () => {
+  const b64 = (bytes: number) => Buffer.alloc(bytes).toString('base64')
+  const image = (data: string | Uint8Array, mediaType?: string): Segment['parts'][number] => ({
+    type: 'image',
+    image: data,
+    ...(mediaType ? { mediaType } : {}),
+  })
+  const file = (data: string | Uint8Array, mediaType: string): Segment['parts'][number] => ({
+    type: 'file',
+    data,
+    mediaType,
+  })
+  const task =
+    (...parts: Segment['parts']) =>
+    () =>
+      defineTask({ input: [{ role: 'user', parts: [{ type: 'text', text: 'x' }, ...parts] }] })
+
+  it.each<[string, () => unknown, string]>([
+    ['an image URL', task(image('https://example.com/a.png')), '不接受网址'],
+    ['a file URL', task(file('file:///etc/passwd', 'text/plain')), '不接受网址'],
+  ])('AC-002 rejects %s', (_name, fn, issue) => {
+    const { code, issues } = issuesOf(fn)
+    expect(code).toBe('invalid_task')
+    expect(issues.join('\n')).toContain(issue)
+  })
+
+  it.each<[string, () => unknown, string]>([
+    ['an image over the limit', task(image(b64(5_242_881))), '图片过大：5242881 字节'],
+    [
+      'a file over the limit',
+      task(file(new Uint8Array(33_554_433), 'application/pdf')),
+      '文件过大',
+    ],
+    [
+      'more than 20 media',
+      task(...Array.from({ length: 21 }, () => image(b64(3)))),
+      '图片与文件合计 21 个，上限 20',
+    ],
+    ['data that is not base64', task(image('!!!')), '数据不是 base64'],
+    ['a data URL that is not base64', task(image('data:image/png,abc')), 'base64 形式'],
+    [
+      'an unsupported file type',
+      task(file(b64(3), 'application/zip')),
+      '不支持的文件类型 application/zip',
+    ],
+    ['an image part typed as PDF', task(image(b64(3), 'application/pdf')), '不是图片'],
+    ['a file without a media type', task(file(b64(3), '')), '文件缺少 mediaType'],
+  ])('AC-003 rejects %s', (_name, fn, issue) => {
+    const { code, issues } = issuesOf(fn)
+    expect(code).toBe('invalid_task')
+    expect(issues.join('\n')).toContain(issue)
+  })
+
+  it('AC-003 accepts the limits and every data form', () => {
+    expect(task(image(b64(5_242_880)))).not.toThrow()
+    expect(task(...Array.from({ length: 20 }, () => image(b64(3))))).not.toThrow()
+    expect(task(image(new Uint8Array(4)), file(new Uint8Array(4), 'application/pdf'))).not.toThrow()
+    expect(
+      task(image(`data:image/png;base64,${b64(3)}`), file(b64(3), 'text/markdown')),
+    ).not.toThrow()
+  })
+
+  it('AC-003 counts media in history, volatile and tool result images', () => {
+    const history: ModelMessage[] = [
+      { role: 'user', content: Array.from({ length: 8 }, () => image(b64(3))) },
+      {
+        role: 'assistant',
+        content: [{ type: 'tool-call', toolCallId: 'c', toolName: 's', input: {} }],
+      },
+      {
+        role: 'tool',
+        content: [
+          {
+            type: 'tool-result',
+            toolCallId: 'c',
+            toolName: 's',
+            output: '',
+            images: Array.from({ length: 8 }, () => ({ type: 'image' as const, image: b64(3) })),
+          },
+        ],
+      },
+    ]
+    const volatile: Segment[] = [
+      { role: 'user', parts: Array.from({ length: 5 }, () => image(b64(3))) },
+    ]
+    const { issues } = issuesOf(() =>
+      defineTask({ input: [segment('x', 'user')], history, volatile }),
+    )
+    expect(issues).toEqual(['图片与文件合计 21 个，上限 20'])
+    const bad: ModelMessage[] = [{ role: 'user', content: [image('https://x.test/a.png')] }]
+    expect(
+      issuesOf(() => defineTask({ input: [segment('x', 'user')], history: bad })).issues[0],
+    ).toContain('不接受网址')
+  })
+
+  it('AC-004 checks agent instructions, keepRecentImages and required inputs', () => {
+    const base: AgentDef = { id: 'a', instructions: [segment('help')] }
+    const issues = (patch: Partial<AgentDef>) => issuesOf(() => defineAgent({ ...base, ...patch }))
+    expect(
+      issues({ instructions: [{ role: 'system', parts: [image('https://x.test/a.png')] }] }),
+    ).toMatchObject({ code: 'invalid_agent' })
+    for (const keepRecentImages of [0, 1.5]) {
+      expect(issues({ model: { settings: { keepRecentImages } } }).issues).toEqual([
+        'model.settings.keepRecentImages 必须是 ≥ 1 的整数',
+      ])
+    }
+    expect(issues({ model: { requires: { inputs: ['pdf', 'gif' as never] } } }).issues).toEqual([
+      'model.requires.inputs 含未知模态 gif',
+    ])
+    expect(() =>
+      defineAgent({
+        ...base,
+        model: { requires: { inputs: ['image'] }, settings: { keepRecentImages: 1 } },
+      }),
+    ).not.toThrow()
+  })
+})

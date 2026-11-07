@@ -5,6 +5,7 @@ import type { Clock } from '../../contracts/common.js'
 import { isToolError, toolError, type ToolErrorEnvelope } from '../../contracts/errors.js'
 import type { SideModelRequest, SideModelResponse } from '../../contracts/model.js'
 import { isToolContent, type ToolContent, type ToolCtx } from '../../contracts/tool.js'
+import { MAX_IMAGE_BYTES } from '../../core/run/modality.js'
 import type { PreparedTool } from './tools.js'
 
 const DEFAULT_TIMEOUT_MS = 30_000
@@ -125,8 +126,7 @@ export interface ToolImage {
   mediaType: string
 }
 
-/** 单张图片的大小上限（字节）与每次结果的张数上限。 */
-const MAX_IMAGE_BYTES = 5_242_880
+/** 每次结果的图片张数上限；单张上限与任务输入共用。 */
 const MAX_IMAGES = 8
 const BASE64 = /^[A-Za-z0-9+/=\s]+$/
 

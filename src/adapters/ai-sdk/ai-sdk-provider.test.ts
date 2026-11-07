@@ -83,7 +83,7 @@ describe('aiSdkProvider', () => {
     expect(port.capabilities).toEqual({
       contextLimit: 200_000,
       maxOutputTokens: 8192,
-      vision: false,
+      inputs: [],
       toolCalls: true,
       reasoning: 'none',
       systemAfterUser: true,
@@ -472,7 +472,7 @@ describe('aiSdkProvider', () => {
         provider,
         doStream: async () => ({ stream: convertArrayToReadableStream([...text('x'), finish()]) }),
       })
-      const { port } = setup([], { model, capabilities: { contextLimit: 1, vision: true } })
+      const { port } = setup([], { model, capabilities: { contextLimit: 1, inputs: ['image'] } })
       await run(port, input({ messages }))
       return model.doStreamCalls[0]!.prompt
     }

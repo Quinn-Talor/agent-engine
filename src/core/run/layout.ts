@@ -17,6 +17,8 @@ export interface ViewParts {
   maxOutputTokens?: number
   temperature?: number
   topP?: number
+  /** 视图里保留原图的工具结果图片张数（`ModelSettings.keepRecentImages`）；不设时不省略。 */
+  keepRecentImages?: number
 }
 
 /** 纯文本的 system 段转为 system 消息；含图片或文件的段转为 user 消息，内容不丢。 */
@@ -58,12 +60,50 @@ export function renderView(
     : { history: [summary], transcript: transcript.slice(compaction.upTo - history.length) }
 }
 
+/**
+ * 截图老化（BR-004）：工具结果里的图片超过 `keep` 张时，从最早的开始省略，每次省略的张数是 `keep` 的
+ * 整数倍，视图里留 `keep` 到 `2 × keep − 1` 张：成批省略，前缀缓存不会每一步都失效。只删图片、在那条
+ * 工具结果末尾注明，不删消息、不改顺序（工具调用与结果仍然成对）；传入的消息不被修改。
+ */
+export function ageImages(messages: readonly ModelMessage[], keep: number): ModelMessage[] {
+  let total = 0
+  for (const m of messages) {
+    if (m.role === 'tool') for (const r of m.content) total += r.images?.length ?? 0
+  }
+  let remove = total - keep
+  remove -= remove % keep
+  if (remove <= 0) return [...messages]
+  return messages.map((m) => {
+    if (m.role !== 'tool' || remove === 0) return m
+    return {
+      role: 'tool',
+      content: m.content.map((r) => {
+        const count = Math.min(remove, r.images?.length ?? 0)
+        if (count === 0) return r
+        remove -= count
+        const { images, ...rest } = r
+        const kept = images!.slice(count)
+        return {
+          ...rest,
+          output: `${r.output}\n[较早的图片 ${count} 张已从视图省略，需要时重新调用工具]`,
+          ...(kept.length > 0 ? { images: kept } : {}),
+        }
+      }),
+    }
+  })
+}
+
 export function layout(parts: ViewParts): ModelInput {
+  const keep = parts.keepRecentImages
+  const aged =
+    keep === undefined ? undefined : ageImages([...parts.history, ...parts.transcript], keep)
+  const history = aged ? aged.slice(0, parts.history.length) : parts.history
+  const transcript = aged ? aged.slice(parts.history.length) : parts.transcript
   const blockA = [...parts.notice, ...parts.instructions, ...parts.capabilities].map(
     segmentToMessage,
   )
-  const blockB = [...parts.history, ...parts.input.map(segmentToMessage)]
-  const blockC = parts.transcript
+  const blockB = [...history, ...parts.input.map(segmentToMessage)]
+  const blockC = transcript
   const blockD = parts.tail.map(segmentToMessage)
   const messages = [...blockA, ...blockB, ...blockC, ...blockD]
 

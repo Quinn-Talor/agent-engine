@@ -89,10 +89,16 @@ function serialize(m: ModelMessage): string {
         return p.text
       case 'tool-call':
         return `调用 ${p.toolName}(${JSON.stringify(p.input)})`
-      case 'tool-result':
-        return `结果 ${p.toolName}: ${p.output}`
-      default:
-        return `[${p.type}]`
+      case 'tool-result': {
+        const n = p.images?.length ?? 0
+        const images =
+          n > 0 ? `\n[工具 ${p.toolName}（调用 ${p.toolCallId}）返回的图片 ${n} 张]` : ''
+        return `结果 ${p.toolName}: ${p.output}${images}`
+      }
+      case 'image':
+        return '[图片]'
+      case 'file':
+        return `[文件 ${p.filename ?? '未命名'}（${p.mediaType}）]`
     }
   })
   return `${m.role}: ${parts.join('\n')}`

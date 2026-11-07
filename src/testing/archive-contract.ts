@@ -66,14 +66,24 @@ function ended(seq: number, at: number, runId: string): RunEvent {
 function turnStarted(
   runId: string,
   turn: number,
-  opts: { continues?: string; content?: string; rootRunId?: string; session?: string } = {},
+  opts: {
+    continues?: string
+    content?: string
+    media?: string[]
+    rootRunId?: string
+    session?: string
+  } = {},
 ): RunEvent {
   const base = started(1, 1_000, opts.session ?? 's')
   if (base.t !== 'run_started') throw new Error('unreachable')
   const isChild = opts.rootRunId !== undefined
   return {
     ...base,
-    task: { ...base.task, ...(opts.content ? { content: opts.content } : {}) },
+    task: {
+      ...base.task,
+      ...(opts.content ? { content: opts.content } : {}),
+      ...(opts.media ? { media: opts.media } : {}),
+    },
     rootRunId: opts.rootRunId ?? runId,
     ...(isChild
       ? {}
@@ -287,6 +297,27 @@ export function archiveStoreContract(
         await assert.rejects(store.getBlob(own))
         assert.equal(await store.getBlob(shared), '两个会话都引用的内容')
         assert.equal((await store.query({ session: 'other' })).length, 1)
+      },
+    },
+    {
+      // 内容里的图片与文件单独存 blob，引用列在 run_started.task.media（设计 §6.2）。
+      name: 'deletes media blobs listed in task.media with their session, keeping shared ones',
+      async run() {
+        const store = await make()
+        const own = await store.putBlob('aW1hZ2Utb3du')
+        const shared = await store.putBlob(new Uint8Array([1, 2, 3]))
+        const end = Date.now() + DAY_MS
+        await store.append('t1', [
+          turnStarted('t1', 1, { media: [own, shared] }),
+          ended(2, end, 't1'),
+        ])
+        await store.append('x1', [
+          turnStarted('x1', 1, { session: 'other', media: [shared] }),
+          ended(2, 1_000, 'x1'),
+        ])
+        assert.deepEqual(await store.deleteSession('s'), { removedRuns: 1, removedBlobs: 1 })
+        await assert.rejects(store.getBlob(own))
+        assert.deepEqual(Array.from((await store.getBlob(shared)) as Uint8Array), [1, 2, 3])
       },
     },
     {

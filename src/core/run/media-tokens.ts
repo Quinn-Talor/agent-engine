@@ -3,6 +3,7 @@
 // PDF 每页 3000（找不到页时每 100KB 算一页），其他按 1600。宁可高估：压缩早一点，不会撞上窗口。
 
 import type { FilePart } from '../../contracts/common.js'
+import { modalityOf } from './modality.js'
 
 const UNKNOWN_TOKENS = 1600
 const IMAGE_MAX_TOKENS = 1600
@@ -11,8 +12,6 @@ const PIXELS_PER_TOKEN = 750
 const MAX_LONG_EDGE = 1568
 const PDF_PAGE_TOKENS = 3000
 const PDF_BYTES_PER_PAGE = 100_000
-const TEXT_TYPES =
-  /^(?:text\/|application\/(?:json|xml|x-yaml|yaml)$|application\/[\w.+-]*\+(?:json|xml)$)/
 
 /** 按需读字节：base64 只解码要读的那几个字节，不整段解码。 */
 interface Bytes {
@@ -48,6 +47,11 @@ function bytesOf(data: string | Uint8Array): Bytes | undefined {
       return chunk.length >= skip + n ? chunk.subarray(skip, skip + n) : undefined
     },
   }
+}
+
+/** 媒体数据的字节数；网址与非 base64 的 data URL 读不出，返回 undefined。 */
+export function mediaByteLength(data: string | Uint8Array): number | undefined {
+  return bytesOf(data)?.length
 }
 
 const be16 = (b: Uint8Array, i: number) => (b[i]! << 8) | b[i + 1]!
@@ -124,9 +128,9 @@ export function fileTokens(file: FilePart, textTokens: (text: string) => number)
   if (!src) return UNKNOWN_TOKENS
   const all = src.read(0, src.length)
   if (!all) return UNKNOWN_TOKENS
-  const type = file.mediaType.split(';')[0]!.trim().toLowerCase()
-  if (TEXT_TYPES.test(type)) return textTokens(new TextDecoder().decode(all))
-  if (type === 'application/pdf') {
+  const modality = modalityOf(file.mediaType)
+  if (modality === 'text') return textTokens(new TextDecoder().decode(all))
+  if (modality === 'pdf') {
     const pages = Buffer.from(all)
       .toString('latin1')
       .match(/\/Type\s*\/Page(?![A-Za-z])/g)

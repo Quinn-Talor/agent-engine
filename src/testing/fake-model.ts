@@ -40,7 +40,7 @@ export interface FakeModel extends ModelProvider {
 const DEFAULT_CAPABILITIES: ModelCapabilities = {
   contextLimit: 128_000,
   maxOutputTokens: 8192,
-  vision: false,
+  inputs: [],
   toolCalls: true,
   reasoning: 'none',
   systemAfterUser: true,

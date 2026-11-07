@@ -31,6 +31,7 @@ export {
 } from './core/run/state.js'
 export { layout, renderView, segmentToMessage, summaryMessage } from './core/run/layout.js'
 export type { Compaction, ViewParts } from './core/run/layout.js'
+export { MODALITIES, modalityOf } from './core/run/modality.js'
 export {
   estimateMessages,
   estimateText,
