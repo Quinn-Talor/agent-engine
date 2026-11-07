@@ -26,6 +26,18 @@ describe('processExec', () => {
     ).rejects.toThrow()
   })
 
+  it('does not pass host secrets to the command', async () => {
+    process.env.HOOK_TEST_SECRET = 'leak-me'
+    try {
+      const r = await processExec('echo "[$HOOK_TEST_SECRET][${PATH:+path}]"', '', {
+        timeoutMs: 5000,
+      })
+      expect(r.stdout.trim()).toBe('[][path]')
+    } finally {
+      delete process.env.HOOK_TEST_SECRET
+    }
+  })
+
   it('AC-002 ends a command that outlives its timeout', async () => {
     const started = Date.now()
     const r = await processExec('sleep 5', '', { timeoutMs: 200 })

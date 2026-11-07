@@ -1,5 +1,6 @@
 // hook 进程适配器（设计 §5.5）：hook 在独立进程里执行，只通过标准输入输出交互；带超时，
 // 超时或取消时先 SIGTERM、1 秒后 SIGKILL，结束整个进程组；输出各保留前 1MB。
+// 环境变量只给白名单（与 stdio MCP 一致），宿主进程里的凭据不会传给 hook 命令。
 
 import { spawn } from 'node:child_process'
 import { abortError } from '../../sdk.js'
@@ -7,6 +8,17 @@ import type { HookExec } from '../../sdk.js'
 
 const MAX_OUTPUT_BYTES = 1_048_576
 const KILL_GRACE_MS = 1000
+// 与 MCP SDK 给 stdio 服务器的默认白名单一致（sudo 的做法）。
+const INHERITED_ENV = ['HOME', 'LOGNAME', 'PATH', 'SHELL', 'TERM', 'USER']
+
+function safeEnv(): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {}
+  for (const key of INHERITED_ENV) {
+    const value = process.env[key]
+    if (value !== undefined && !value.startsWith('()')) env[key] = value
+  }
+  return env
+}
 
 function collector() {
   const chunks: Buffer[] = []
@@ -29,6 +41,7 @@ export const processExec: HookExec = (command, input, opts) =>
     const child = spawn(command, {
       shell: true,
       detached: true,
+      env: safeEnv(),
       stdio: ['pipe', 'pipe', 'pipe'],
       ...(opts.cwd ? { cwd: opts.cwd } : {}),
     })
