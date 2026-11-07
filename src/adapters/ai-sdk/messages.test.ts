@@ -50,7 +50,13 @@ const view: ModelMessage[] = [
     ],
   },
 ]
-const plain = { systemAfterUser: true, dropReasoning: false, anthropic: false, vision: false }
+const plain = {
+  systemAfterUser: true,
+  dropReasoning: false,
+  anthropic: false,
+  vision: false,
+  provider: 'mock',
+}
 
 describe('toSdkMessages', () => {
   it('AC-011 converts every part and replays reasoning with its signature', () => {
@@ -60,7 +66,7 @@ describe('toSdkMessages', () => {
       role: 'user',
       content: [
         { type: 'text', text: '看图' },
-        { type: 'image', image: 'data:image/png;base64,AA', mediaType: 'image/png' },
+        { type: 'file', data: 'data:image/png;base64,AA', mediaType: 'image/png' },
         { type: 'file', data: 'JVBER', mediaType: 'application/pdf', filename: 'a.pdf' },
       ],
     })
@@ -178,40 +184,152 @@ describe('cleanLeakedToolMarkup', () => {
 })
 
 describe('tool results with images', () => {
-  const withImage: ModelMessage[] = [
-    {
-      role: 'tool',
-      content: [
-        {
-          type: 'tool-result',
-          toolCallId: 'c1',
-          toolName: 'screenshot',
-          output: '截图如下',
-          isError: false,
-          images: [{ type: 'image', image: 'AQID', mediaType: 'image/png' }],
-        },
-      ],
-    },
-  ]
-  const outputOf = (vision: boolean) => {
-    const [message] = toSdkMessages(withImage, { ...plain, vision })
+  type ToolResult = Extract<ModelMessage, { role: 'tool' }>['content'][number]
+  const shot: ToolResult = {
+    type: 'tool-result',
+    toolCallId: 'c1',
+    toolName: 'screenshot',
+    output: '截图如下',
+    isError: false,
+    images: [{ type: 'image', image: 'AQID', mediaType: 'image/png' }],
+  }
+  const withImage: ModelMessage[] = [{ role: 'tool', content: [shot] }]
+  const outputOf = (vision: boolean, provider = 'anthropic.messages') => {
+    const [message] = toSdkMessages(withImage, { ...plain, vision, provider })
     return (message as { content: Array<{ output: unknown }> }).content[0]!.output
   }
 
-  it('AC-017 sends the image as content to a vision model', () => {
-    expect(outputOf(true)).toEqual({
-      type: 'content',
-      value: [
-        { type: 'text', text: '截图如下' },
-        { type: 'file', mediaType: 'image/png', data: { type: 'data', data: 'AQID' } },
-      ],
-    })
-  })
+  it.each(['anthropic.messages', 'openai.responses', 'google.generative-ai'])(
+    'AC-017 sends the image inside the tool result through %s',
+    (provider) => {
+      expect(toSdkMessages(withImage, { ...plain, vision: true, provider })).toHaveLength(1)
+      expect(outputOf(true, provider)).toEqual({
+        type: 'content',
+        value: [
+          { type: 'text', text: '截图如下' },
+          { type: 'file', mediaType: 'image/png', data: { type: 'data', data: 'AQID' } },
+        ],
+      })
+    },
+  )
 
   it('AC-017 tells a model without vision that the image was left out', () => {
     expect(outputOf(false)).toEqual({
       type: 'text',
       value: '截图如下\n[图片 1 张：模型不支持视觉，未展示]',
+    })
+    expect(toSdkMessages(withImage, { ...plain, provider: 'openai.chat' })).toHaveLength(1)
+  })
+
+  // OpenAI Chat 与 OpenAI 兼容接口把工具结果里的图片序列化成文本：图片改放进下一条 user 消息。
+  describe('through a provider that turns tool result images into text', () => {
+    const batch: ModelMessage[] = [
+      { role: 'user', content: '截两张图' },
+      {
+        role: 'assistant',
+        content: [
+          { type: 'tool-call', toolCallId: 'c1', toolName: 'screenshot', input: {} },
+          { type: 'tool-call', toolCallId: 'c2', toolName: 'search', input: {} },
+          { type: 'tool-call', toolCallId: 'c3', toolName: 'camera', input: {} },
+        ],
+      },
+      {
+        role: 'tool',
+        content: [
+          shot,
+          { type: 'tool-result', toolCallId: 'c2', toolName: 'search', output: '无图' },
+          {
+            type: 'tool-result',
+            toolCallId: 'c3',
+            toolName: 'camera',
+            output: '',
+            images: [
+              { type: 'image', image: 'BBBB' },
+              { type: 'image', image: 'CCCC', mediaType: 'image/jpeg' },
+            ],
+          },
+        ],
+      },
+      { role: 'assistant', content: '看到了' },
+    ]
+    const chat = { ...plain, vision: true, provider: 'openai.chat' }
+
+    it('AC-017 leaves a note in the tool result and sends the images right after the batch', () => {
+      const out = toSdkMessages(batch, chat)
+      expect(out.map((m) => m.role)).toEqual(['user', 'assistant', 'tool', 'user', 'assistant'])
+      expect(
+        (out[2] as { content: Array<{ output: unknown }> }).content.map((r) => r.output),
+      ).toEqual([
+        { type: 'text', value: '截图如下\n[图片 1 张：见下一条消息]' },
+        { type: 'text', value: '无图' },
+        { type: 'text', value: '\n[图片 2 张：见下一条消息]' },
+      ])
+      expect(out[3]).toEqual({
+        role: 'user',
+        content: [
+          { type: 'text', text: '[工具 screenshot（调用 c1）返回的图片 1 张，不是用户发送的]' },
+          { type: 'file', data: 'AQID', mediaType: 'image/png' },
+          { type: 'text', text: '[工具 camera（调用 c3）返回的图片 2 张，不是用户发送的]' },
+          { type: 'file', data: 'BBBB', mediaType: 'image' },
+          { type: 'file', data: 'CCCC', mediaType: 'image/jpeg' },
+        ],
+      })
+    })
+
+    it('AC-017 waits for every tool message of the batch before sending the images', () => {
+      const split: ModelMessage[] = [
+        batch[1]!,
+        { role: 'tool', content: [shot] },
+        {
+          role: 'tool',
+          content: [{ type: 'tool-result', toolCallId: 'c2', toolName: 'search', output: '无图' }],
+        },
+      ]
+      expect(toSdkMessages(split, chat).map((m) => m.role)).toEqual([
+        'assistant',
+        'tool',
+        'tool',
+        'user',
+      ])
+    })
+
+    it('AC-017 sends no images for an error result', () => {
+      const failed: ModelMessage[] = [
+        {
+          role: 'tool',
+          content: [{ ...shot, isError: true, output: 'ERROR' }],
+        },
+      ]
+      expect(toSdkMessages(failed, chat)).toEqual([
+        {
+          role: 'tool',
+          content: [
+            {
+              type: 'tool-result',
+              toolCallId: 'c1',
+              toolName: 'screenshot',
+              output: { type: 'error-text', value: 'ERROR' },
+            },
+          ],
+        },
+      ])
+    })
+
+    it('AC-016 puts a cache breakpoint on the tool batch after its images', () => {
+      const out = toSdkMessages(batch, { ...chat, anthropic: true, cacheBreakpoints: [2] })
+      expect(out[2]).not.toHaveProperty('providerOptions')
+      expect(out[3]).toMatchObject({
+        role: 'user',
+        providerOptions: { anthropic: { cacheControl: { type: 'ephemeral' } } },
+      })
+    })
+
+    it('AC-012 rewrites a later system message once the images went out as a user message', () => {
+      const out = toSdkMessages([batch[1]!, batch[2]!, { role: 'system', content: '提示' }], {
+        ...chat,
+        systemAfterUser: false,
+      })
+      expect(out.at(-1)).toEqual({ role: 'user', content: '[system] 提示' })
     })
   })
 })

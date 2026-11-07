@@ -136,6 +136,7 @@ function createPort(
         ...(input.cacheBreakpoints ? { cacheBreakpoints: input.cacheBreakpoints } : {}),
         anthropic: vendor === 'anthropic',
         vision: capabilities.vision,
+        provider: config.model.provider,
       }),
       ...(input.tools.length > 0
         ? {

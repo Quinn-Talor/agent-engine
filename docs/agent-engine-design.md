@@ -1109,9 +1109,9 @@ interface ModelResponse {
 | reasoning 参数 | Anthropic：thinking 预算 2048 / 4096 / 8192；OpenAI：`reasoningEffort`，并开启 `parallelToolCalls`；Google：`thinkingConfig`，关闭时为 0；Ollama：`think`。强制开启 thinking 的模型，只有用户选择关闭时才注入关闭参数。SDK 会过滤的厂商私有参数在 fetch 层注入 |
 | 采样参数 | `ModelInput` 带 `temperature`、`topP` 时原样传给 `streamText`，不带时不发 |
 | 端口参数 | `settings` 为厂商、推理档位、是否丢弃历史推理、`providerOptions`、顶层 `reasoning` 与排好序的 header 名；header 值可能是凭据，不计入 |
-| 工具结果的图片 | 模型支持视觉（`capabilities.vision`）时，带图片的工具结果发成内容（文本 + 图片文件）；不支持时发文本，末尾加一行"[图片 N 张：模型不支持视觉，未展示]" |
+| 工具结果的图片 | 模型支持视觉（`capabilities.vision`）时，按模型实例的 `provider` 分两种发法。`anthropic.messages`、`openai.responses`、`google.generative-ai` 的厂商包能把工具结果里的图片作为图片发出：带图片的工具结果发成内容（文本 + 图片文件）。其他厂商包（OpenAI Chat、OpenAI 兼容接口等）会把它序列化成 base64 文本，模型看不到图，token 还会暴涨：工具结果只发文本，末尾注明"[图片 N 张：见下一条消息]"，图片放进这批工具结果之后的一条 user 消息，开头注明来自哪个工具的哪次调用、不是用户发送的。工具结果必须紧跟发起调用的 assistant 消息，所以整批结束才发这条消息；缓存断点落在它上面。名单按 AI SDK 7 各厂商包的源码核对，不在名单里的都走第二种，任何厂商都看得到图。不支持视觉时发文本，末尾加一行"[图片 N 张：模型不支持视觉，未展示]" |
 | 应用调用参数 | 应用为模型声明的 `callSettings`：`providerOptions` 按厂商键与上面的 reasoning 参数逐字段合并，同一字段应用优先（具体的厂商参数优先于通用的推理档位，与 AI SDK 一致）；`headers` 与 AI SDK 的顶层 `reasoning` 原样传入。参数随模型配置固定。顶层 `reasoning` 与上面的 reasoning 参数是同一件事的两个通用开关，只能给一个，两个都给时创建提供方即报错 |
-| 消息规整 | `systemAfterUser=false` 的厂商：把 user 之后的 system 消息改写成带固定标记的 user 内容。清洗泄漏的工具调用标记 |
+| 消息规整 | `systemAfterUser=false` 的厂商：把 user 之后的 system 消息改写成带固定标记的 user 内容。用户消息里的图片发成 file 片段（AI SDK 7 已弃用 image 片段），没给类型时写 `image`，由 SDK 按字节识别格式。清洗泄漏的工具调用标记 |
 | 推理回放 | 推理内容和签名原样带回；某个模型不能稳定接受带签名的回放时，适配器可以配置为丢弃历史推理内容 |
 | 工具选择 | 只在兜底交付时用 `toolChoice = 'none'`，工具定义照常传入；厂商不支持时忽略返回的工具调用 |
 | 缓存断点 | 仅 Anthropic，ephemeral（5 分钟）：打在稳定前缀末尾（能力说明之后）和运行记录末尾，两处重合时只打一个 |

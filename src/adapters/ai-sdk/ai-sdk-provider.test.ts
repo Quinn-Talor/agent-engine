@@ -446,6 +446,56 @@ describe('aiSdkProvider', () => {
     })
   })
 
+  it('AC-017 places tool result images by the provider of the model instance', async () => {
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).toString('base64')
+    const messages: ModelInput['messages'] = [
+      { role: 'user', content: '截图' },
+      {
+        role: 'assistant',
+        content: [{ type: 'tool-call', toolCallId: 'c1', toolName: 'shot', input: {} }],
+      },
+      {
+        role: 'tool',
+        content: [
+          {
+            type: 'tool-result',
+            toolCallId: 'c1',
+            toolName: 'shot',
+            output: '好了',
+            images: [{ type: 'image', image: png, mediaType: 'image/png' }],
+          },
+        ],
+      },
+    ]
+    const promptOf = async (provider: string) => {
+      const model = new MockLanguageModelV4({
+        provider,
+        doStream: async () => ({ stream: convertArrayToReadableStream([...text('x'), finish()]) }),
+      })
+      const { port } = setup([], { model, capabilities: { contextLimit: 1, vision: true } })
+      await run(port, input({ messages }))
+      return model.doStreamCalls[0]!.prompt
+    }
+
+    const chat = await promptOf('openai.chat')
+    expect(chat.map((m) => m.role)).toEqual(['user', 'assistant', 'tool', 'user'])
+    expect(chat[2]).toMatchObject({
+      content: [{ output: { type: 'text', value: '好了\n[图片 1 张：见下一条消息]' } }],
+    })
+    expect(chat[3]).toMatchObject({
+      content: [
+        { type: 'text', text: '[工具 shot（调用 c1）返回的图片 1 张，不是用户发送的]' },
+        { type: 'file', mediaType: 'image/png' },
+      ],
+    })
+
+    const responses = await promptOf('openai.responses')
+    expect(responses.map((m) => m.role)).toEqual(['user', 'assistant', 'tool'])
+    expect(responses[2]).toMatchObject({
+      content: [{ output: { type: 'content', value: [{ type: 'text' }, { type: 'file' }] } }],
+    })
+  })
+
   it('AC-013 drops reasoning history when configured', async () => {
     const { port, model } = setup([[...text('x'), finish()]], { dropReasoningHistory: true })
     await run(
