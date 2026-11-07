@@ -2,6 +2,7 @@
 
 import type { ModelMessage } from '../../contracts/common.js'
 import type { ModelCapabilities, ModelToolSpec } from '../../contracts/model.js'
+import { fileTokens, imageTokens } from './media-tokens.js'
 
 // 中日韩字符的码点区间：CJK 标点、假名、扩展 A、基本汉字、韩文音节、兼容汉字、全角形式。
 const CJK_RANGES: ReadonlyArray<readonly [number, number]> = [
@@ -15,7 +16,6 @@ const CJK_RANGES: ReadonlyArray<readonly [number, number]> = [
 ]
 const CJK_WEIGHT = 0.67
 const OTHER_WEIGHT = 0.25
-const MEDIA_TOKENS = 85
 const MIN_CALIBRATION = 0.5
 const MAX_CALIBRATION = 2
 
@@ -44,14 +44,17 @@ function rawMessage(message: ModelMessage): number {
         total += rawText(part.text)
         break
       case 'image':
+        total += imageTokens(part.image)
+        break
       case 'file':
-        total += MEDIA_TOKENS
+        total += fileTokens(part, rawText)
         break
       case 'tool-call':
         total += rawText(part.toolName + JSON.stringify(part.input))
         break
       case 'tool-result':
-        total += rawText(part.output) + (part.images?.length ?? 0) * MEDIA_TOKENS
+        total += rawText(part.output)
+        for (const image of part.images ?? []) total += imageTokens(image.image)
         break
     }
   }

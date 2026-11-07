@@ -15,7 +15,7 @@ describe('estimateText', () => {
 })
 
 describe('estimateMessages', () => {
-  it('AC-019 counts each image of a tool result as 85', () => {
+  it('AC-019 counts each image of a tool result by its size', () => {
     const result = (images: number): ModelMessage => ({
       role: 'tool',
       content: [
@@ -36,15 +36,16 @@ describe('estimateMessages', () => {
         },
       ],
     })
-    expect(estimateMessages([result(1)]) - estimateMessages([result(0)])).toBe(85)
-    expect(estimateMessages([result(2)]) - estimateMessages([result(0)])).toBe(170)
+    // 'AQID' 读不出尺寸，每张按 1600。
+    expect(estimateMessages([result(1)]) - estimateMessages([result(0)])).toBe(1600)
+    expect(estimateMessages([result(2)]) - estimateMessages([result(0)])).toBe(3200)
   })
 
-  it('AC-001 counts an image part as 85', () => {
+  it('AC-001 counts an image part whose size cannot be read as 1600', () => {
     const messages: ModelMessage[] = [
       { role: 'user', content: [{ type: 'image', image: 'data:image/png;base64,AAAA' }] },
     ]
-    expect(estimateMessages(messages)).toBe(85)
+    expect(estimateMessages(messages)).toBe(1600)
   })
 
   it('sums every part kind and rounds once at the end', () => {
@@ -64,8 +65,8 @@ describe('estimateMessages', () => {
       },
       { role: 'user', content: [{ type: 'file', data: 'x', mediaType: 'application/pdf' }] },
     ]
-    // 0.5 + 0.5 + 0.5 + ('x{"a":1}' 8 字符 → 2) + 1 + 85 = 89.5 → 90
-    expect(estimateMessages(messages)).toBe(90)
+    // 0.5 + 0.5 + 0.5 + ('x{"a":1}' 8 字符 → 2) + 1 + （没有页标记的 PDF 按一页）3000 = 3004.5 → 3005
+    expect(estimateMessages(messages)).toBe(3005)
   })
 })
 
