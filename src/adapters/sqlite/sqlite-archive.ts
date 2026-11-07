@@ -2,6 +2,7 @@
 // 是一个事务，seq 必须连续；run_started、step_ended、run_ended 时更新 runs；超过 4KB 的 blob 用 gzip；
 // 保留按执行环境配置天数，固定的运行永久保留，清理后对 blob 做标记清除（最近写过的 blob 不清除）。
 // 表结构版本记在 meta.schema_version：版本不同的文件拒绝打开，不做迁移。会话按整体过期与删除（会话方案 §13）。
+// 一个档案同一时刻只给一个引擎实例：打开时占住旁边的锁文件，第二个打开者直接报错（设计 §3.12 补齐的前提）。
 // better-sqlite3 是可选的 peer 依赖：调用 sqliteArchive() 时才加载（方案 D4）。
 
 import { createRequire } from 'node:module'
@@ -169,6 +170,27 @@ function checkVersion(db: BetterSqlite3.Database): void {
   }
 }
 
+/**
+ * 占住 `<file>.lock`：独占锁在连接关闭或进程退出（包括被杀）时由操作系统释放，不会留下过期的占用。
+ * 锁另放一个文件，档案本身仍允许别的连接只读打开。
+ */
+function claim(Database: typeof BetterSqlite3, file: string): BetterSqlite3.Database | undefined {
+  if (file === '' || file === ':memory:') return undefined
+  const lock = new Database(`${file}.lock`, { timeout: 0 })
+  try {
+    lock.pragma('locking_mode = EXCLUSIVE')
+    lock.exec('BEGIN EXCLUSIVE; COMMIT')
+    return lock
+  } catch (error) {
+    lock.close()
+    if ((error as { code?: unknown }).code !== 'SQLITE_BUSY') throw error
+    throw new Error(
+      `archive: 档案 ${file} 正被另一个引擎实例使用；一个档案同一时刻只能给一个引擎实例`,
+      { cause: error },
+    )
+  }
+}
+
 export function sqliteArchive(opts: {
   file: string
   retention?: { defaultDays: number; environments?: Record<string, number> }
@@ -178,7 +200,15 @@ export function sqliteArchive(opts: {
   // 可选的 peer 依赖：用到时才加载原生模块，导入包入口不要求安装它。
   const Database = createRequire(import.meta.url)('better-sqlite3') as typeof BetterSqlite3
   const clock = opts.clock ?? systemClock()
-  const db = new Database(opts.file)
+  // 先占锁再打开档案：没占到锁的进程不碰档案，打开时的保留清理也不做。
+  const lock = claim(Database, opts.file)
+  let db: BetterSqlite3.Database
+  try {
+    db = new Database(opts.file)
+  } catch (error) {
+    lock?.close()
+    throw error
+  }
   try {
     // 读者与写者并存（单写多读）：遇到锁先等待，不立即报 SQLITE_BUSY。
     db.pragma(`busy_timeout = ${BUSY_TIMEOUT_MS}`)
@@ -190,6 +220,7 @@ export function sqliteArchive(opts: {
     db.exec(SCHEMA)
   } catch (error) {
     db.close()
+    lock?.close()
     throw error
   }
 
@@ -398,7 +429,10 @@ export function sqliteArchive(opts: {
     async deleteSession(session) {
       return deleteSessionNow(session)
     },
-    close: () => db.close(),
+    close: () => {
+      db.close()
+      lock?.close()
+    },
   }
 
   if (opts.retention) retainNow({ ...opts.retention, now: clock.now() })

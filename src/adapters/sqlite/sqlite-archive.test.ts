@@ -161,6 +161,20 @@ describe('sqliteArchive', () => {
     again.close()
   })
 
+  it('refuses a second opener while the archive is in use, and lets readers in', async () => {
+    const file = fileOf()
+    const first = sqliteArchive({ file })
+    await first.append('r1', run('r1', 1000))
+    expect(() => sqliteArchive({ file })).toThrow('正被另一个引擎实例使用')
+    const reader = new Database(file, { readonly: true })
+    expect(reader.prepare('SELECT run_id FROM runs').all()).toEqual([{ run_id: 'r1' }])
+    reader.close()
+    first.close()
+    const again = sqliteArchive({ file })
+    expect(await again.query({})).toHaveLength(1)
+    again.close()
+  })
+
   it('AC-003 compresses large blobs and keeps binary data intact', async () => {
     const file = fileOf()
     const store = sqliteArchive({ file })
