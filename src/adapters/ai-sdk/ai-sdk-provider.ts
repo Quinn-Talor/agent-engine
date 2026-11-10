@@ -343,3 +343,13 @@ export function aiSdkProvider(opts: {
     },
   }
 }
+
+// 同一子路径还导出运行转前端流协议（设计 §2）。
+export { runToUIMessageStream, runToUIMessageStreamResponse } from './ui-message-stream.js'
+export type {
+  RunDataParts,
+  RunMessageMetadata,
+  RunUIMessage,
+  RunUIMessageChunk,
+  RunUIStreamOptions,
+} from './ui-message-stream.js'

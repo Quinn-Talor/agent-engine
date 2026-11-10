@@ -10,6 +10,10 @@ export default defineConfig({
       { find: /^agent-engine$/, replacement: src('index.ts') },
       { find: /^agent-engine\/sdk$/, replacement: src('sdk.ts') },
       { find: /^agent-engine\/testing$/, replacement: src('testing.ts') },
+      {
+        find: /^agent-engine\/adapters\/ai-sdk$/,
+        replacement: src('adapters/ai-sdk/ai-sdk-provider.ts'),
+      },
     ],
   },
   test: {

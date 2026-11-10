@@ -6,7 +6,8 @@
     "paths": {
       "agent-engine": ["../src/index.ts"],
       "agent-engine/sdk": ["../src/sdk.ts"],
-      "agent-engine/testing": ["../src/testing.ts"]
+      "agent-engine/testing": ["../src/testing.ts"],
+      "agent-engine/adapters/ai-sdk": ["../src/adapters/ai-sdk/ai-sdk-provider.ts"]
     }
   },
   "include": ["**/*.ts"]

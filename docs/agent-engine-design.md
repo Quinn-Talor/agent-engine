@@ -309,7 +309,24 @@ interface RunResult {
   steps: number
   toolCalls: number
 }
+
+// —— 前端流（agent-engine/adapters/ai-sdk，需要 ai）——
+function runToUIMessageStream(run: Run, opts?: RunUIStreamOptions): ReadableStream<RunUIMessageChunk>
+function runToUIMessageStreamResponse(run: Run,
+  opts?: RunUIStreamOptions & { headers?: Record<string, string> }): Response
+                                      // SSE；每个事件产生的最后一个片段带 id: <seq>
+interface RunUIStreamOptions {
+  fromSeq?: number                    // 缺省 1：从头回放；续流取 Last-Event-ID + 1，不再发 start
+  archive?: Pick<ArchiveStore, 'getBlob'>   // 读工具结果正文；不给时结果只带状态
+}
+interface RunMessageMetadata {        // start 带 runId；finish 带结局
+  runId: string; status?: RunStatus; code?: string
+  intent?: RunResult['intent']; output?: unknown; error?: RunResult['error']
+}
+type RunUIMessage = UIMessage<RunMessageMetadata, { 'tool-progress': { toolCallId: string; note: string } }>
 ```
+
+**前端流**把运行转成 AI SDK 的 UI message stream，`useChat` 直接消费。片段由运行日志决定：引擎的一步是 `start-step` … `finish-step`；推理与正文是 `reasoning-*`、`text-*` 部件；工具调用是 `tool-<工具名>` 部件，依次经过输入、审批请求与答复、结果、出错或被拒绝；运行结局在 `finish` 的消息元数据里（`awaiting_input` 时带 `intent`），失败后再发 `error`。实时增量只做预览，每一步在模型调用落定时按日志校正，对不上（中途接入、模型适配器清理过文本）就 `reset-step` 后整段重发；被退回或转兜底的草稿也用 `reset-step` 去掉。续流有两种：不带 `fromSeq` 从头回放（`useChat` 的 `resume`，收到 `start` 重建消息）；带 `fromSeq` 只发之后的片段。审批人稍后答复时工具部件停在 `approval-requested`，答复随下一次请求带回、开会话的下一轮；行动环节的事件在这批工具结束后才写入，等着答复的审批人在流里看不到实时请求。子运行不展开，委托调用是父运行里的一个工具部件。前端断开只解除订阅，不取消运行。
 
 ---
 
@@ -1767,7 +1784,7 @@ examples/        按应用的写法使用包名（agent-engine、agent-engine/te
 | `agent-engine` | 应用 API、标准组件、`createEngine`、`mcpHost`（第一次连接时才加载 MCP 适配器）、`hookRunner`、`consoleLogger` | 用 MCP 时装 `@modelcontextprotocol/sdk` |
 | `agent-engine/sdk` | 组件作者 API | — |
 | `agent-engine/testing` | 测试工具（§13） | — |
-| `agent-engine/adapters/ai-sdk` | `aiSdkProvider` | `ai` |
+| `agent-engine/adapters/ai-sdk` | `aiSdkProvider`；前端流 `runToUIMessageStream`、`runToUIMessageStreamResponse`（§2） | `ai` |
 | `agent-engine/adapters/sqlite` | `sqliteArchive` | `better-sqlite3` |
 | `agent-engine/adapters/mcp-stdio`、`agent-engine/adapters/mcp-http` | `stdioConnect`、`httpConnect` | `@modelcontextprotocol/sdk` |
 
