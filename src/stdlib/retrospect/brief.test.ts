@@ -15,13 +15,14 @@ const retro = (patch: Partial<RunRetrospective> = {}): RunRetrospective => ({
   steps: [
     {
       step: 1,
+      attempts: 1,
       tools: [
         { name: 'search', ok: true },
         { name: 'search', ok: true },
         { name: 'fetch', ok: false, errorCode: 'TOOL_TIMEOUT' },
       ],
     },
-    { step: 2, tools: [] },
+    { step: 2, attempts: 2, tools: [] },
   ],
   deliveries: [],
   sideEffects: [
@@ -72,9 +73,39 @@ describe('retrospect.brief', () => {
     expect(retrospect.brief(retro())).toBe(retrospect.brief(retro()))
   })
 
+  it('AC-005 reads only guard signals: approvals, model failures, compactions and checks leave it unchanged', () => {
+    const base = retro()
+    const enriched = retro({
+      queuedMs: 7,
+      timeline: [
+        { step: 1, kind: 'approval', callId: 'c9', answer: 'approved', waitedMs: 40 },
+        ...base.timeline.slice(0, 2),
+        { step: 3, kind: 'model_failed', code: 'MODEL_TIMEOUT', attempts: 2 },
+        { step: 3, kind: 'compaction', reason: 'in_run' },
+        ...base.timeline.slice(2),
+        { step: 4, kind: 'approval', callId: 'c10', answer: 'deferred', waitedMs: 0 },
+      ],
+      deliveries: [
+        {
+          step: 2,
+          path: 'normal',
+          attempt: 1,
+          outcome: 'returned',
+          issues: ['x'],
+          checks: [
+            { source: 'output', mode: 'gate', pass: true },
+            { source: 'completion', mode: 'gate', pass: false },
+          ],
+        },
+      ],
+    })
+    expect(retrospect.brief(enriched)).toBe(retrospect.brief(base))
+  })
+
   it('covers unfinished runs without triggers or side effects, keeping the last 10 steps', () => {
     const steps = Array.from({ length: 12 }, (_, i) => ({
       step: i + 1,
+      attempts: 1,
       tools: [{ name: 'read', ok: true }],
     }))
     const text = retrospect.brief(retro({ end: undefined, timeline: [], sideEffects: [], steps }))

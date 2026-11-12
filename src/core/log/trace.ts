@@ -1,9 +1,9 @@
-// Trace 投影（设计 §6.6）：运行 → 步 → 模型调用 / 工具 / 外部调用 / 反思参与者，时间信息全部取自运行日志。
+// Trace 投影（设计 §6.6）：运行 → 步 → 模型调用 / 工具 / 外部调用 / 反思参与者 / 交付验收，时间信息全部取自运行日志。
 
 import type { RunEvent } from '../../contracts/events.js'
 
 export interface TraceNode {
-  kind: 'run' | 'step' | 'model' | 'tool' | 'external' | 'opinion'
+  kind: 'run' | 'step' | 'model' | 'tool' | 'external' | 'opinion' | 'check'
   name: string
   startedAt: number
   durationMs?: number
@@ -38,6 +38,11 @@ export function buildTrace(events: readonly RunEvent[]): TraceNode | undefined {
     run.attrs.queuedMs = started.queuedMs
     run.attrs.model = started.model
     run.attrs.agentId = started.agent.id
+    // 会话的一轮：子运行的 run_started 没有 session，不推算。
+    if (started.session) {
+      run.attrs.session = started.session.id
+      run.attrs.turn = started.session.turn
+    }
   }
 
   const toolNames = new Map<string, string>()
@@ -124,6 +129,29 @@ export function buildTrace(events: readonly RunEvent[]): TraceNode | undefined {
           )
         }
         break
+      case 'delivery_checked': {
+        // 没通过的验收不是出错：属性不用 isError、error，导出器据 pass 标出。
+        const delivery = { attempt: e.attempt, path: e.path, outcome: e.outcome }
+        container().children.push(
+          node('check', 'output', e.at, 0, {
+            pass: e.output.ok,
+            mode: 'gate',
+            ...delivery,
+            issues: e.output.issues?.length ?? 0,
+          }),
+        )
+        for (const c of e.checks) {
+          container().children.push(
+            node('check', c.source, e.at, 0, {
+              pass: c.pass,
+              mode: c.mode,
+              ...delivery,
+              issues: c.issues?.length ?? 0,
+            }),
+          )
+        }
+        break
+      }
       case 'run_ended':
         if (step) step.durationMs = e.at - step.startedAt
         step = undefined

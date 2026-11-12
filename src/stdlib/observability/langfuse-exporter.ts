@@ -1,5 +1,6 @@
 // Langfuse 导出（设计 §6.6、方案 D7）：运行事件 → Langfuse ingestion 事件数据：trace、span、generation
-// （模型调用，带模型与用量）；只产出数据结构，发送由应用注入。
+// （模型调用，带模型与用量）；只产出数据结构，发送由应用注入。会话的一轮带 `sessionId` 与轮次；
+// 没通过的验收 span 记为 WARNING。
 
 import type { Logger } from '../../sdk.js'
 import { exportOnEnd, walk, type ExportSubscriber } from './trace-export.js'
@@ -22,6 +23,7 @@ export function langfuseExporter(opts: {
       const nodes = walk(trace, runId)
       const runNodeId = nodes[0]!.id
       const model = typeof trace.attrs.model === 'string' ? trace.attrs.model : undefined
+      const session = typeof trace.attrs.session === 'string' ? trace.attrs.session : undefined
       const events: LangfuseEvent[] = [
         {
           type: 'trace-create',
@@ -29,9 +31,11 @@ export function langfuseExporter(opts: {
             id: runId,
             name: typeof trace.attrs.agentId === 'string' ? trace.attrs.agentId : 'run',
             timestamp: iso(trace.startedAt),
+            ...(session ? { sessionId: session } : {}),
             metadata: {
               status: trace.attrs.status,
               ...(trace.attrs.code !== undefined ? { code: trace.attrs.code } : {}),
+              ...(session ? { turn: trace.attrs.turn } : {}),
             },
           },
         },
@@ -57,10 +61,12 @@ export function langfuseExporter(opts: {
             },
           })
         } else {
-          events.push({
-            type: 'span-create',
-            body: { ...common, metadata: node.attrs, level: error ? 'ERROR' : 'DEFAULT' },
-          })
+          const level = error
+            ? 'ERROR'
+            : node.kind === 'check' && node.attrs.pass === false
+              ? 'WARNING'
+              : 'DEFAULT'
+          events.push({ type: 'span-create', body: { ...common, metadata: node.attrs, level } })
         }
       }
       return events

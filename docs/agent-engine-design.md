@@ -14,7 +14,10 @@
 **承载与使用归引擎，配置与选择归应用。** 引擎不负责：
 - 用哪些 MCP 服务器、装哪些插件、给哪个 agent 什么能力；
 - 会话的产品层（会话 id 怎么来、谁能访问、会话列表、界面停在哪个分支）、界面、业务数据；会话的上下文（接续与分叉、下一轮的窗口、跨轮压缩、副作用台账）归引擎，见 §3.15；
-- prompt 内容、工具的业务实现。
+- prompt 内容、工具的业务实现；
+- 效果评估：评审与打分、分数存储、跨运行汇总、实验对比、看板。
+
+效果评估要用的事实由引擎保证，即**可评估性**：运行日志里的事实完整；运行、会话的轮、步、调用都有稳定的引用（`runId`、`session.id` 与 `turn`、`step`、`callId`）；投影可读（trace、复盘、监督统计、运行摘要，§6.3）；导出如实（§6.6）。评什么、怎么评、分数存在哪，由应用或观测平台决定。
 
 ### 0.2 目标
 
@@ -997,10 +1000,10 @@ type RunEvent = { seq: number; at: number } & (
 | Observation[] | 每步的事实 |
 | Deliveries | 每次交付尝试：输出校验、验收结果、去向 |
 | NormalizedUsage | 用量：主模型、记忆、监督、工具、子运行分开 |
-| Trace | 观测树：运行 → 步 → 模型调用 / 工具 / 外部调用 / 子运行；每个节点带开始时间和耗时（§6.6） |
+| Trace | 观测树：运行 → 步 → 模型调用 / 工具 / 外部调用 / 反思参与者 / 交付验收 / 子运行；每个节点带开始时间和耗时；会话的一轮在根节点带会话 id 与轮次（§6.6） |
 | SideEffects | 已执行的副作用清单 |
 | SupervisionStats | 守卫告知与终止、顺延、纠偏消息、告知有效、封路违规、顾问采纳、验收结果 |
-| RunRetrospective | 运行复盘（§10.8） |
+| RunRetrospective | 运行复盘（§10.8）：时间线（守卫信号、干预、审批、模型失败、压缩）、每步的模型尝试次数与工具成败、交付记录与每条验收的结论、副作用、子运行、用量、排队与耗时 |
 | Corpus | 语料：任务输入 + history + 工具输出中的 `shown` + 会话之前各轮的副作用台账（`origin: 'ledger'`） |
 | RunSummary | 运行摘要 |
 
@@ -1038,12 +1041,13 @@ type RunEvent = { seq: number; at: number } & (
 
 | 节点 | 开始 | 结束 / 耗时 | 其他 |
 |---|---|---|---|
-| 运行 | `run_started.at` | `run_ended.at` | 准入排队 `queuedMs` |
+| 运行 | `run_started.at` | `run_ended.at` | 准入排队 `queuedMs`；会话的一轮带会话 id `session` 与轮次 `turn`（子运行没有） |
 | 步 | `step_started.at` | `step_ended.at` | — |
 | 模型调用 | `model_responded.startedAt` | 事件的 `at` | 首 token `firstTokenAt`；每次尝试的开始、耗时、错误（`attempts`） |
 | 工具调用 | `tool_finished.startedAt` | `durationMs` | 审批等待 `approval_answered.waitedMs`；子运行 `childRunId` |
 | 外部调用 | `external_call.startedAt` | `durationMs` | 来源与种类、用量 |
 | 反思参与者 | — | `evaluated.opinions[].durationMs` | — |
+| 交付验收 | `delivery_checked.at` | 耗时记为 0（模型类验收另有外部调用节点带耗时） | 每次交付尝试一组：输出校验（`output`，`mode` 为 `gate`）与每条验收各一个节点，带 `pass`、`mode`、`attempt`、`path`、`outcome`、问题条数；没通过不算出错 |
 
 **诊断日志**
 
@@ -1052,6 +1056,10 @@ type RunEvent = { seq: number; at: number } & (
 - 条目带 `runId` 和 `step`（有的话），可以和运行日志关联。
 
 **导出到外部追踪工具**：标准组件库提供订阅者 `otelExporter(opts)` 和 `langfuseExporter(opts)`，把运行事件转换成 OpenTelemetry span 或 Langfuse observation。它们不在核心里；导出失败只写诊断日志。
+
+- 会话的一轮：OTel 在根 span 上写 `gen_ai.conversation.id`（GenAI 语义约定，仍在开发中）以及 `agent.session`、`agent.turn`；Langfuse 在 trace 上写 `sessionId` 与 `metadata.turn`。外部平台据此按会话归组。
+- 没通过的验收：OTel span 的状态仍为 OK，属性 `agent.pass` 为 false；Langfuse span 的 `level` 为 `WARNING`。
+- 只导出元数据，不导出提示与答复内容。
 
 
 ---
@@ -1600,7 +1608,7 @@ MCP 工具在引擎里叫 `<服务器名>__<工具名>`，交给 hook 匹配和�
 
 ### 10.8 复盘与重跑
 
-**`RunRetrospective` 投影**（确定性）：问题时间线（守卫信号：告知 / 终止 / 等待输入、detail、是否顺延；干预）、交付记录、结束原因、已执行的副作用清单、用量与耗时、子运行概况。
+**`RunRetrospective` 投影**（确定性）：时间线（守卫信号：告知 / 终止 / 等待输入、detail、是否顺延；干预；审批：同意 / 拒绝 / 延后与等待时长；模型调用失败：错误码与尝试次数；压缩：只记压缩发生变化的那一步）、每步的模型尝试次数（含重试）与工具成败、交付记录（每次尝试的去向、问题，以及输出校验与每条验收的结论）、结束原因、已执行的副作用清单、用量、准入排队与耗时、子运行概况。评估要用的运行事实都从这里取，不另建指标投影。
 
 **`retrospect.brief(retro)`**：确定性地生成一段说明，包括上次试了什么、卡在哪里、已执行的副作用。
 

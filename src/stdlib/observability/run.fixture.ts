@@ -1,4 +1,5 @@
-// 测试用运行事件：两步、一次失败的工具调用、一次监督模型调用、一条意见（只被测试使用）。
+// 测试用运行事件：两步、一次失败的工具调用、一次监督模型调用、一条意见、一次交付（只被测试使用）。
+// `sessionRunEvents` 是会话第 3 轮：第 1 次交付被验收退回，第 2 次通过。
 
 import type { Observation, RunEvent, RunEventBody } from '../../sdk.js'
 
@@ -161,3 +162,49 @@ export const runEvents = (runId = 'run-1'): RunEvent[] =>
     const event = { ...body, seq: i + 1, at } as RunEvent
     return event.t === 'run_ended' ? { ...event, result: { ...event.result, runId } } : event
   })
+
+/** 会话 s1 的第 3 轮：第 1 步之后交付被退回（completion 不通过，grounding 旁路不通过），第 2 步之后交付通过。 */
+export const sessionRunEvents = (runId = 'run-1'): RunEvent[] => {
+  const events: RunEvent[] = []
+  for (const e of runEvents(runId)) {
+    if (e.t === 'run_started') {
+      events.push({
+        ...e,
+        session: {
+          id: 's1',
+          turn: 3,
+          window: { version: 1, turnStarts: [0, 4, 9], ledger: [], tokens: 120 },
+        },
+      })
+    } else if (e.t === 'delivery_checked') {
+      events.push({
+        ...e,
+        attempt: 2,
+        checks: [
+          { source: 'completion', mode: 'gate', pass: true },
+          { source: 'grounding', mode: 'shadow', pass: true },
+        ],
+      })
+    } else {
+      events.push(e)
+    }
+    if (e.t === 'step_ended' && e.step === 1) {
+      events.push({
+        t: 'delivery_checked',
+        step: 1,
+        path: 'normal',
+        attempt: 1,
+        output: { ok: true },
+        checks: [
+          { source: 'completion', mode: 'gate', pass: false, issues: ['没有回答第二问'] },
+          { source: 'grounding', mode: 'shadow', pass: false, issues: ['数字没有出处'] },
+        ],
+        outcome: 'returned',
+        hint: '补上第二问',
+        seq: 0,
+        at: e.at + 5,
+      })
+    }
+  }
+  return events.map((e, i) => ({ ...e, seq: i + 1 }))
+}

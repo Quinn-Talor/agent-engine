@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { sha256Hex, type LogEntry } from '../../sdk.js'
 import { otelExporter, type OtelSpan } from './otel-exporter.js'
-import { runEvents } from './run.fixture.js'
+import { runEvents, sessionRunEvents } from './run.fixture.js'
 
 async function feed(sub: ReturnType<typeof otelExporter>, events = runEvents()) {
   for (const e of events) await sub.onEvent!(e)
@@ -25,6 +25,7 @@ describe('otelExporter', () => {
       'engine:advisor',
       'step 2',
       'model',
+      'output',
     ])
     const byName = (name: string, n = 0) => spans.filter((s) => s.name === name)[n]!
     const run = byName('run')
@@ -106,8 +107,42 @@ describe('otelExporter', () => {
     const [first, second] = send.mock.calls.map((c) => c[0] as OtelSpan[])
     expect(first!.map((s) => s.name)).toEqual(second!.map((s) => s.name))
     expect(first!.every((s) => s.attributes['agent.run_id'] === 'run-a')).toBe(true)
-    expect(first).toHaveLength(8)
+    expect(first).toHaveLength(9)
     expect(second!.every((s) => s.attributes['agent.run_id'] === 'run-b')).toBe(true)
+  })
+
+  it('AC-003 tags a session turn with the conversation id and marks failed checks without an error status', async () => {
+    const sent: OtelSpan[][] = []
+    await feed(otelExporter({ send: (s) => void sent.push(s) }), sessionRunEvents())
+    const spans = sent[0]!
+    expect(spans[0]!.attributes).toMatchObject({
+      'gen_ai.conversation.id': 's1',
+      'agent.session': 's1',
+      'agent.turn': 3,
+    })
+    const checks = spans.filter((s) => s.attributes['agent.kind'] === 'check')
+    expect(
+      checks.map((s) => [s.name, s.attributes['agent.pass'], s.attributes['agent.mode']]),
+    ).toEqual([
+      ['output', true, 'gate'],
+      ['completion', false, 'gate'],
+      ['grounding', false, 'shadow'],
+      ['output', true, 'gate'],
+      ['completion', true, 'gate'],
+      ['grounding', true, 'shadow'],
+    ])
+    expect(checks.every((s) => s.status.code === 'OK')).toBe(true)
+    expect(checks[1]!.attributes).toMatchObject({
+      'agent.attempt': 1,
+      'agent.outcome': 'returned',
+      'agent.issues': 1,
+    })
+    expect(checks[1]!.startTimeUnixNano).toBe(checks[1]!.endTimeUnixNano)
+
+    const plain: OtelSpan[][] = []
+    await feed(otelExporter({ send: (s) => void plain.push(s) }))
+    expect(plain[0]![0]!.attributes).not.toHaveProperty('gen_ai.conversation.id')
+    expect(plain[0]![0]!.attributes).not.toHaveProperty('agent.session')
   })
 
   it('AC-010 marks a failed run as an error', async () => {

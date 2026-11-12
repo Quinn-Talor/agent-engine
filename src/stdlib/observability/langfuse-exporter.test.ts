@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { LogEntry } from '../../sdk.js'
 import { langfuseExporter, type LangfuseEvent } from './langfuse-exporter.js'
-import { runEvents } from './run.fixture.js'
+import { runEvents, sessionRunEvents } from './run.fixture.js'
 
 describe('langfuseExporter', () => {
   it('AC-011 sends a trace with spans and generations in tree order', async () => {
@@ -27,6 +27,7 @@ describe('langfuseExporter', () => {
       ['span-create', 'engine:advisor'],
       ['span-create', 'step 2'],
       ['generation-create', 'model'],
+      ['span-create', 'output'],
     ])
     const step1 = events[1]!.body
     const generation = events[2]!.body
@@ -44,6 +45,40 @@ describe('langfuseExporter', () => {
       metadata: { errorCode: 'TOOL_TIMEOUT' },
     })
     expect(events[4]!.body).toMatchObject({ level: 'DEFAULT' })
+  })
+
+  it('AC-004 groups a session turn by sessionId and warns on failed checks', async () => {
+    const sent: LangfuseEvent[][] = []
+    const sub = langfuseExporter({ send: (events) => void sent.push(events) })
+    for (const e of sessionRunEvents()) await sub.onEvent!(e)
+    const [trace, ...observations] = sent[0]!
+    expect(trace).toEqual({
+      type: 'trace-create',
+      body: {
+        id: 'run-1',
+        name: 'helper',
+        timestamp: new Date(1000).toISOString(),
+        sessionId: 's1',
+        metadata: { status: 'completed', turn: 3 },
+      },
+    })
+    const checks = observations.filter(
+      (e) => e.body.metadata && (e.body.metadata as { pass?: unknown }).pass !== undefined,
+    )
+    expect(checks.map((e) => [e.type, e.body.name, e.body.level])).toEqual([
+      ['span-create', 'output', 'DEFAULT'],
+      ['span-create', 'completion', 'WARNING'],
+      ['span-create', 'grounding', 'WARNING'],
+      ['span-create', 'output', 'DEFAULT'],
+      ['span-create', 'completion', 'DEFAULT'],
+      ['span-create', 'grounding', 'DEFAULT'],
+    ])
+
+    const plain: LangfuseEvent[][] = []
+    const other = langfuseExporter({ send: (events) => void plain.push(events) })
+    for (const e of runEvents()) await other.onEvent!(e)
+    expect(plain[0]![0]!.body).not.toHaveProperty('sessionId')
+    expect(plain[0]![0]!.body.metadata).toEqual({ status: 'completed' })
   })
 
   it('AC-012 logs a failed send', async () => {

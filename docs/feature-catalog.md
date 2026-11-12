@@ -136,6 +136,7 @@ hook 在独立进程组里跑，带超时，取消时结束整个进程组，环
 | 档案：内存、SQLite（锁文件保证单实例），保留清理、固定、删除会话 | `memory-archive.ts`、`sqlite-archive.ts` | 档案契约测试（两种档案共用） |
 | 严格回放、回归回放 | `src/core/log/replay.ts`、`src/engine/replay.ts` | `replay.test.ts`、法律咨询 |
 | trace、OTel、Langfuse 导出 | `trace.ts`、`src/stdlib/observability/` | 单测、法律咨询 |
+| 可评估性：trace 带会话与轮次、交付验收节点；导出带会话（OTel `gen_ai.conversation.id`、Langfuse `sessionId`），没通过的验收标出；复盘补上审批、模型失败与重试次数、压缩、每条验收的结论、排队时长 | `trace.ts`、`retrospective.ts`、`src/stdlib/observability/` | 单测、`feature-tour.test.ts` |
 | 健康状态：熔断器、准入 | `engine.ts` | `create-engine` |
 
 ## 12. 稳定性
@@ -180,3 +181,4 @@ hook 在独立进程组里跑，带超时，取消时结束整个进程组，环
 | SQLite 档案的保留清理只在档案契约测试里验证，没有经引擎跑 | 未补 |
 | 全部端到端测试用脚本化模型，没有用真实大模型跑过 | 需要模型 API key |
 | 已知缺口（评审结论，不属于测试问题）：没有执行沙箱、多实例部署、跨会话长期记忆 | 见整体评审 |
+| 效果评估（评审打分、分数存储、跨运行汇总、实验对比）不归引擎 | 引擎只提供可评估性，见设计 §0.1；复盘与 trace 已补齐评估要用的事实（§11） |

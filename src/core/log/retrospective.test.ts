@@ -19,6 +19,9 @@ import { retrospective } from './retrospective.js'
 
 const go = { continue: { interventions: [] }, sources: ['default'] }
 
+const attempts = (n: number) =>
+  Array.from({ length: n }, (_, i) => ({ startedAt: i * 100, durationMs: 50 }))
+
 const scenario = (): RunEvent[] =>
   sequence([
     runStarted({ rootRunId: 'r1' }),
@@ -104,19 +107,38 @@ describe('retrospective', () => {
     expect(retro.steps).toEqual([
       {
         step: 1,
+        attempts: 1,
         tools: [
           { name: 'search', ok: true },
           { name: 'search', ok: false, errorCode: 'TOOL_TIMEOUT' },
           { name: 'write', ok: true },
         ],
       },
-      { step: 2, tools: [] },
-      { step: 3, tools: [] },
+      { step: 2, attempts: 1, tools: [] },
+      { step: 3, attempts: 1, tools: [] },
     ])
     expect(retro.deliveries).toEqual([
-      { step: 2, path: 'normal', attempt: 1, outcome: 'returned', issues: ['引文无法核实'] },
-      { step: 3, path: 'normal', attempt: 1, outcome: 'delivered', issues: [] },
+      {
+        step: 2,
+        path: 'normal',
+        attempt: 1,
+        outcome: 'returned',
+        issues: ['引文无法核实'],
+        checks: [
+          { source: 'output', mode: 'gate', pass: true },
+          { source: 'check:grounding', mode: 'gate', pass: false },
+        ],
+      },
+      {
+        step: 3,
+        path: 'normal',
+        attempt: 1,
+        outcome: 'delivered',
+        issues: [],
+        checks: [{ source: 'output', mode: 'gate', pass: true }],
+      },
     ])
+    expect(retro.queuedMs).toBe(0)
     expect(retro.sideEffects).toEqual([
       expect.objectContaining({ toolName: 'write', input: { path: 'a.txt' }, status: 'executed' }),
     ])
@@ -143,8 +165,8 @@ describe('retrospective', () => {
     ])
     const retro = retrospective(events)
     expect(retro.steps).toEqual([
-      { step: 1, tools: [{ name: 'search', ok: true }] },
-      { step: 2, tools: [{ name: 'fetch', ok: false, errorCode: 'TOOL_TIMEOUT' }] },
+      { step: 1, attempts: 1, tools: [{ name: 'search', ok: true }] },
+      { step: 2, attempts: 1, tools: [{ name: 'fetch', ok: false, errorCode: 'TOOL_TIMEOUT' }] },
     ])
     expect(retro.toolCalls).toBe(2)
   })
@@ -170,6 +192,131 @@ describe('retrospective', () => {
     expect(retro.end).toBeUndefined()
     expect(retro.durationMs).toBeUndefined()
     expect(retro.runId).toBe('')
+  })
+
+  it('AC-005 adds queueing, model attempts, approvals, compactions and each check verdict', () => {
+    const summary = 'sha256:5555555555555555555555555555555555555555555555555555555555555555'
+    const events = sequence([
+      runStarted({ queuedMs: 7 }),
+      stepStarted(1),
+      {
+        ...contextBuilt(1),
+        compaction: { upTo: 4, summary, reason: 'turn_start', tokens: { before: 900, after: 300 } },
+      },
+      modelResponded(1, {
+        toolCalls: [call('c1', 'refund'), call('c2', 'refund')],
+        attempts: attempts(3),
+      }),
+      { t: 'approval_answered', callId: 'c1', approved: true, waitedMs: 40 },
+      { t: 'approval_answered', callId: 'c2', approved: false, waitedMs: 12 },
+      toolFinished('c1', { effect: 'side_effect' }),
+      toolFinished('c2', { isError: true, errorCode: 'APPROVAL_DENIED' }),
+      evaluated(1, go),
+      stepEnded(1),
+      stepStarted(2),
+      { ...contextBuilt(2), compaction: { upTo: 4, summary } },
+      modelResponded(2, { text: '草稿', attempts: attempts(1) }),
+      evaluated(2, { complete: true, sources: ['candidate'] }),
+      stepEnded(2),
+      deliveryChecked(2, 'returned', {
+        output: { ok: true },
+        checks: [
+          { source: 'completion', mode: 'gate', pass: false, issues: ['没有回答第二问'] },
+          { source: 'grounding', mode: 'shadow', pass: false, issues: ['数字没有出处'] },
+        ],
+      }),
+      stepStarted(3),
+      { ...contextBuilt(3), compaction: { upTo: 4, summary } },
+      modelResponded(3, { text: '定稿', attempts: attempts(1) }),
+      evaluated(3, { complete: true, sources: ['candidate'] }),
+      stepEnded(3),
+      deliveryChecked(3, 'delivered', {
+        attempt: 2,
+        checks: [
+          { source: 'completion', mode: 'gate', pass: true },
+          { source: 'grounding', mode: 'shadow', pass: true },
+        ],
+      }),
+      runEnded(),
+    ])
+    const retro = retrospective(events)
+    expect(retro.queuedMs).toBe(7)
+    expect(retro.steps.map((s) => [s.step, s.attempts])).toEqual([
+      [1, 3],
+      [2, 1],
+      [3, 1],
+    ])
+    expect(retro.timeline).toEqual([
+      { step: 1, kind: 'compaction', reason: 'turn_start' },
+      { step: 1, kind: 'approval', callId: 'c1', answer: 'approved', waitedMs: 40 },
+      { step: 1, kind: 'approval', callId: 'c2', answer: 'denied', waitedMs: 12 },
+    ])
+    expect(retro.deliveries.map((d) => d.checks)).toEqual([
+      [
+        { source: 'output', mode: 'gate', pass: true },
+        { source: 'completion', mode: 'gate', pass: false },
+        { source: 'grounding', mode: 'shadow', pass: false },
+      ],
+      [
+        { source: 'output', mode: 'gate', pass: true },
+        { source: 'completion', mode: 'gate', pass: true },
+        { source: 'grounding', mode: 'shadow', pass: true },
+      ],
+    ])
+  })
+
+  it('AC-005 records a deferred approval at the step it was asked in', () => {
+    const events = sequence([
+      runStarted(),
+      stepStarted(1),
+      contextBuilt(1),
+      modelResponded(1, { toolCalls: [call('c3', 'refund')] }),
+      { t: 'approval_answered', callId: 'c3', approved: false, deferred: true, waitedMs: 0 },
+      toolFinished('c3', { isError: true, errorCode: 'APPROVAL_PENDING' }),
+      evaluated(1, { awaitInput: { code: 'approval_pending' }, sources: ['guard:approval'] }),
+      stepEnded(1),
+      runEnded({ status: 'awaiting_input', code: 'approval_pending' }),
+    ])
+    expect(retrospective(events).timeline).toEqual([
+      { step: 1, kind: 'approval', callId: 'c3', answer: 'deferred', waitedMs: 0 },
+    ])
+  })
+
+  it('AC-005 records a failed model call and counts an empty attempt list as one attempt', () => {
+    const events = sequence([
+      runStarted(),
+      stepStarted(1),
+      contextBuilt(1),
+      modelResponded(1, { toolCalls: [call('c1', 'search')] }),
+      toolFinished('c1'),
+      evaluated(1, go),
+      stepEnded(1),
+      stepStarted(2),
+      contextBuilt(2),
+      {
+        t: 'model_failed',
+        step: 2,
+        startedAt: 0,
+        error: {
+          code: 'MODEL_TIMEOUT',
+          message: 'timeout',
+          retryable: true,
+          attempts: attempts(2),
+        },
+      },
+      runEnded({ status: 'failed', code: 'model_error' }),
+    ])
+    const retro = retrospective(events)
+    expect(retro.steps.map((s) => [s.step, s.attempts])).toEqual([[1, 1]])
+    expect(retro.timeline).toEqual([
+      { step: 2, kind: 'model_failed', code: 'MODEL_TIMEOUT', attempts: 2 },
+    ])
+  })
+
+  it('has no queueing time without run_started', () => {
+    const retro = retrospective(sequence([stepStarted(1), modelResponded(1)]))
+    expect(retro).not.toHaveProperty('queuedMs')
+    expect(retro.steps).toEqual([{ step: 1, attempts: 1, tools: [] }])
   })
 
   it('carries the error message of a failed run', () => {

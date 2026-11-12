@@ -1,5 +1,6 @@
 // 功能全流程：应用从包入口装配引擎，跑通一个 Claude Code 插件（skill、子 agent、MCP、四种 hook）驱动的
-// 多步循环，以及多模态输入从受理、组装到 AI SDK 请求体的整条路径。hook 是真实子进程。
+// 多步循环，以及多模态输入从受理、组装到 AI SDK 请求体的整条路径。hook 是真实子进程。最后从档案读出一轮会话的
+// 事件，确认复盘与 trace 带齐评估要用的事实。
 
 import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -8,6 +9,7 @@ import { MockLanguageModelV4, convertArrayToReadableStream } from 'ai/test'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import {
   adaptHooks,
+  buildTrace,
   createEngine,
   createMcpHost,
   defineAgent,
@@ -17,6 +19,8 @@ import {
   memoryArchive,
   modelHub,
   parsePlugin,
+  retrospective,
+  riskApproval,
   skill,
   subagent,
   text,
@@ -444,5 +448,81 @@ describe('feature tour: claims are checked against what was executed', () => {
       executed: ['第 1 轮已执行 refund {"orderId":"O1"}'],
     })
     expect(refund.calls).toHaveLength(1)
+  })
+})
+
+describe('feature tour: a session turn read back from the archive is ready to evaluate', () => {
+  it('AC-006 gives the retrospective and trace the denied approval, both check verdicts and the session', async () => {
+    const model = fakeModel({
+      model: 'main',
+      replies: [
+        { toolCalls: [{ id: 'r1', name: 'refund', input: { orderId: 'O1' } }] },
+        { text: '订单 O1 已退款。' },
+        {
+          text: '{"complete": false, "confidence": 0.9, "missing": ["声称已退款，但审批被拒，没有执行"]}',
+        },
+        // 改正后的答复不再声称已执行，确定性打分即通过，不再请评审。
+        { text: '退款需要审批，这次审批没有通过，订单 O1 暂时无法退款。' },
+      ],
+    })
+    const archive = memoryArchive()
+    const engine = createEngine({
+      services: {
+        models: modelHub({ providers: [model], default: model.ref }),
+        archive,
+        logger: quiet,
+      },
+    })
+    const env = engine.environment({
+      name: 'shop',
+      principal: { reachable: true, approver: { approve: async () => ({ approved: false }) } },
+      permissions: [riskApproval({ mode: 'ask-high' })],
+    })
+    const refund = fakeTool({
+      name: 'refund',
+      risk: 'high',
+      effect: 'side_effect',
+      result: '已退款',
+    })
+    const agent = defineAgent({
+      id: 'clerk',
+      instructions: [{ role: 'system', parts: [{ type: 'text', text: '你是客服' }] }],
+      capabilities: [tools([refund])],
+    })
+    const run = env.start(
+      agent,
+      defineTask({ input: [{ role: 'user', parts: [{ type: 'text', text: '给 O1 退款' }] }] }),
+      { session: 'eval' },
+    )
+    expect(await run.result).toMatchObject({ status: 'completed' })
+    expect(refund.calls).toHaveLength(0)
+
+    const events: RunEvent[] = []
+    for await (const e of archive.read(run.runId)) events.push(e)
+    assertInvariants(events)
+
+    const retro = retrospective(events)
+    expect(retro.timeline.filter((t) => t.kind === 'approval')).toEqual([
+      { step: 1, kind: 'approval', callId: 'r1', answer: 'denied', waitedMs: expect.any(Number) },
+    ])
+    expect(retro.deliveries).toHaveLength(2)
+    expect(retro.deliveries[0]!.checks).toEqual(
+      expect.arrayContaining([expect.objectContaining({ pass: false })]),
+    )
+    expect(retro.deliveries[1]!.checks.every((c) => c.pass)).toBe(true)
+    expect(retro.steps.length).toBeGreaterThan(0)
+    expect(retro.steps.every((s) => s.attempts >= 1)).toBe(true)
+    expect(retro.queuedMs).toEqual(expect.any(Number))
+
+    const trace = buildTrace(events)!
+    expect(trace.attrs).toMatchObject({ session: 'eval', turn: 1 })
+    expect(
+      trace.children.filter((c) => c.kind === 'check').map((c) => [c.name, c.attrs.pass]),
+    ).toEqual(
+      expect.arrayContaining([
+        ['check:completion', false],
+        ['check:completion', true],
+      ]),
+    )
   })
 })

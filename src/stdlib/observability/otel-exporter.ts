@@ -1,6 +1,7 @@
 // OpenTelemetry 导出（设计 §6.6、方案 D7）：运行事件 → OTLP 风格的 span 数据；只产出数据结构，
 // 发送由应用注入。traceId 由根运行 id 得出，同一棵委托树的运行在同一条 trace 里；子运行的根 span
-// 挂在父运行发起它的工具 span 下。
+// 挂在父运行发起它的工具 span 下。会话的一轮在根 span 上带会话 id；没通过的验收 span 状态仍为 OK，
+// 由属性 `agent.pass` 标出。
 
 import { sha256Hex } from '../../sdk.js'
 import type { Logger, TraceNode } from '../../sdk.js'
@@ -19,6 +20,12 @@ export interface OtelSpan {
 }
 
 const nanos = (ms: number) => (BigInt(Math.round(ms)) * 1_000_000n).toString()
+
+/**
+ * 会话 id 的属性名，取自 OpenTelemetry GenAI 语义约定（开发中，2026-06 迁到 semantic-conventions-genai）；
+ * 约定改名时只改这一处。
+ */
+const CONVERSATION_ID = 'gen_ai.conversation.id'
 
 function attributesOf(node: TraceNode): Record<string, string | number | boolean> {
   const out: Record<string, string | number | boolean> = {}
@@ -62,6 +69,9 @@ export function otelExporter(opts: {
           'service.name': serviceName,
           'agent.kind': node.kind,
           'agent.run_id': runId,
+          ...(node.kind === 'run' && typeof node.attrs.session === 'string'
+            ? { [CONVERSATION_ID]: node.attrs.session }
+            : {}),
           ...attributesOf(node),
         },
         status: error ? { code: 'ERROR' as const, message: error } : { code: 'OK' as const },
