@@ -2,7 +2,7 @@
 
 import type { ModelMessage, Segment } from '../../contracts/common.js'
 import type { Corpus, Observation } from '../../contracts/component.js'
-import type { BlobRef, RunEvent, RunOrigin } from '../../contracts/events.js'
+import type { BlobRef, LedgerEntry, RunEvent, RunOrigin } from '../../contracts/events.js'
 import type { QualityReport, RunSummary } from '../../contracts/run.js'
 import type { ToolEffect } from '../../contracts/tool.js'
 import { parseCanonical } from '../definition/hash.js'
@@ -207,7 +207,9 @@ export function sideEffects(events: readonly RunEvent[]): SideEffect[] {
   return list
 }
 
-/** 语料：任务输入 + history + 工具输出中的 shown（设计 §6.3）。 */
+const LEDGER_STATUS = { executed: '已执行', possibly_executed: '可能已执行' } as const
+
+/** 语料：任务输入 + history + 工具输出中的 shown + 会话之前各轮的副作用台账（设计 §6.3）。 */
 export function buildCorpus(parts: {
   input: readonly Segment[]
   history: readonly ModelMessage[]
@@ -218,6 +220,7 @@ export function buildCorpus(parts: {
     effect?: ToolEffect
     isError?: boolean
   }>
+  ledger?: readonly LedgerEntry[]
 }): Corpus {
   const sources: Array<Corpus['sources'][number]> = []
   for (const segment of parts.input) {
@@ -236,5 +239,12 @@ export function buildCorpus(parts: {
   }
   for (const { text, callId, ...meta } of parts.toolOutputs)
     sources.push({ origin: 'tool', text, callId, ...meta })
+  for (const l of parts.ledger ?? []) {
+    sources.push({
+      origin: 'ledger',
+      text: `第 ${l.turn} 轮${LEDGER_STATUS[l.status]} ${l.tool} ${l.input}`,
+      toolName: l.tool,
+    })
+  }
   return { sources }
 }

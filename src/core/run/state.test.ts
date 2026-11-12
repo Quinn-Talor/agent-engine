@@ -240,6 +240,42 @@ describe('state machine', () => {
     expect(state.tools.finish).toMatchObject({ capability: 'intents', effect: 'side_effect' })
   })
 
+  it.each([
+    ['the model wrote no text', '', '要退哪一笔订单？'],
+    ['the model wrote text', '我先确认一下。', '我先确认一下。'],
+  ])('takes the reply of an intent as the candidate text when %s', (_name, text, expected) => {
+    const state = fold([
+      runStarted({
+        capabilities: [
+          {
+            capability: 'intents',
+            kind: 'intents',
+            version: '3',
+            fingerprint: 'fp',
+            tools: [
+              {
+                name: 'ask_user',
+                schemaHash: 'h',
+                intent: { kind: 'await_input', code: 'ask_user', reply: 'question' },
+              },
+            ],
+          },
+        ],
+      }),
+      stepStarted(1),
+      contextBuilt(1),
+      modelResponded(1, {
+        text,
+        toolCalls: [call('c1', 'ask_user', { question: '要退哪一笔订单？' })],
+      }),
+      toolFinished('c1', { capability: 'intents' }),
+      evaluated(1, completeVerdict, {
+        intent: { tool: 'ask_user', kind: 'await_input', code: 'ask_user' },
+      }),
+    ])
+    expect(state.candidate?.text).toBe(expected)
+  })
+
   it('finalizes through the fallback path with the fallback code', () => {
     const state = fold([
       runStarted(),

@@ -38,7 +38,7 @@ const cap = (id: string, prepared: Partial<Prepared> | (() => Promise<Prepared>)
 const runInfo = (principalReachable = true): RunInfo => ({
   runId: 'r1',
   rootRunId: 'r1',
-  environment: { name: 'test', principalReachable },
+  environment: { name: 'test', principalReachable, approver: false },
   agent: { id: 'helper' },
   task: {},
   model: { ref: 'fake:model', contextLimit: 100_000 },

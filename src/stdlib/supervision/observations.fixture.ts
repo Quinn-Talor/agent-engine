@@ -53,7 +53,7 @@ export const facts = (step: number, patch: Partial<StepFacts> = {}): StepFacts =
 const RUN: RunInfo = {
   runId: 'r1',
   rootRunId: 'r1',
-  environment: { name: 'env', principalReachable: true },
+  environment: { name: 'env', principalReachable: true, approver: false },
   agent: { id: 'a' },
   task: { input: '分析这家公司' },
   model: { ref: 'fake:m', contextLimit: 1000 },

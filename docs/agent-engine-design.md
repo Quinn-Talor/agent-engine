@@ -529,7 +529,7 @@ type RunUIMessage = UIMessage<RunMessageMetadata, { 'tool-progress': { toolCallI
 
 | 结局 | 含义 | 典型 code |
 |---|---|---|
-| `completed` | 交付了结果 | —；以意图工具完成时为该意图的 code，如 `finish` |
+| `completed` | 交付了结果 | —；以完成类意图工具完成时为该意图的 code，如结构化交付的 `submit` |
 | `awaiting_input` | 需要委托人回复才能继续 | `ask_user`、`propose`、`approval_pending`、守卫给出的 code |
 | `finalized` | 没完成，给出了阶段性交付 | `repeat`、`failure_streak`、`stall`、`no_progress`、`max_steps`、`timeout`、`empty_output`、`user_denied`、`spawn_failed`、`external_failure`、`truncated` |
 | `stopped` | 没完成，直接停止 | `blocked`、`stale_dossier`、`content_filter`、`context_overflow`、`budget`、`timeout`、`guard_error:<id>` |
@@ -675,7 +675,7 @@ interface Prepared {
 | Skill | `skill(pkg)` | 按内容哈希冻结 SKILL.md | 能力说明里的 skill 列表；共享的激活工具 | skill 宿主 |
 | 子 agent | `subagent(agent, opts)` | 计算子 agent 指纹 | 共享的委托工具 | 委托调度 |
 | 规划 | `planning(opts)` | 直接使用 | `update_plan` 工具、计划推进守卫 `progress`、使用说明 | — |
-| 与委托人沟通 | `intents()` | 委托人联系不上时排除 `ask_user`、`propose` | 意图工具 `finish`、`ask_user`、`propose`、`report_blocked`，以及使用说明 | — |
+| 与委托人沟通 | `intents()` | 委托人联系不上时排除 `ask_user`、`propose`；执行环境有审批人时，使用说明加上"需要审批的操作直接调用工具" | 意图工具 `ask_user`、`propose`、`report_blocked`，以及使用说明 | — |
 | 能力包 | `bundle({ ... })` | 展开 | 工具、说明、守卫 | — |
 | 自定义 | 实现 `Capability` | 自定义 | 自定义 | 可以注册新的宿主 |
 
@@ -889,7 +889,7 @@ background.start(analyst, defineTask({
 **结果未知的副作用**：有副作用的调用超时、执行中抛错或被取消、执行成功但结果没存下来（`TOOL_RESULT_LOST`）时，`tool_finished` 记 `possiblyExecuted: true`；错误提示加上"结果未知，可能已经执行：先核实是否已经生效，不要用相同输入重试"；封路对相同输入第 1 次就封住；副作用清单里记为"可能已执行"。
 
 - `ToolCtx.idempotencyKey` = runId + callId，重试时不变。有副作用的工具应把它传给外部系统去重。
-- **已执行的副作用清单**由 `effect` 不为 `none` 且执行成功的调用组成（进程中断时没有结果的有副作用调用单独列为"可能已执行"），用于兜底交付、复盘与重跑、完成审查。
+- **已执行的副作用清单**由 `effect` 不为 `none` 且执行成功的调用组成（进程中断时没有结果的有副作用调用单独列为"可能已执行"），用于兜底交付、复盘与重跑、完成审查；会话里之前各轮的副作用台账也进入验收语料，完成审查据此核对"声称已执行"。
 
 ### 5.5 隔离与影子模式
 
@@ -941,7 +941,7 @@ for (let s = nextStage(state); s; s = nextStage(state)) {
 ```ts
 type RunEvent = { seq: number; at: number } & (
   | { t: 'run_started'; agent: AgentSnapshot; task: TaskSnapshot;
-      environment: { name: string; fingerprint: string; principalReachable: boolean };
+      environment: { name: string; fingerprint: string; principalReachable: boolean; approver?: true };
       engine: { fingerprint: string };
       capabilities: CapabilitySnapshot[]; unavailable: Array<{ capability: string; reason: string }>;
       model: ModelRef; modelFingerprint: string; contextLimit: number; outputReserve: number; queuedMs: number;
@@ -1001,7 +1001,7 @@ type RunEvent = { seq: number; at: number } & (
 | SideEffects | 已执行的副作用清单 |
 | SupervisionStats | 守卫告知与终止、顺延、纠偏消息、告知有效、封路违规、顾问采纳、验收结果 |
 | RunRetrospective | 运行复盘（§10.8） |
-| Corpus | 语料：任务输入 + history + 工具输出中的 `shown` |
+| Corpus | 语料：任务输入 + history + 工具输出中的 `shown` + 会话之前各轮的副作用台账（`origin: 'ledger'`） |
 | RunSummary | 运行摘要 |
 
 **结束时的自检**：检查 I2、I11、I13、I14、I15、I16，以及观测树是否完整。开发和测试环境下，自检失败即报错；生产环境下写诊断日志（error），不中断应用。
@@ -1012,7 +1012,7 @@ type RunEvent = { seq: number; at: number } & (
 |---|---|---|
 | Agent | id、指令哈希、每项能力的 id / 种类 / 版本 / 配置哈希、工具呈现、默认交付物、模型偏好与要求、采样参数（给了才计入） | 统计和回放按它区分 agent；`version` 只是业务标签，不参与 |
 | 任务 | 输入与 history 的哈希、业务上下文、交付物、目标、守卫、预算、作业范围 | 追溯这次做的是什么 |
-| 执行环境 | 名称、委托人能否联系上、须知哈希、权限规则、守卫、强制验收、上限 | 区分不同的规矩 |
+| 执行环境 | 名称、委托人能否联系上、有没有审批人（怎么审批由应用实现，不参与）、须知哈希、权限规则、守卫、强制验收、上限 | 区分不同的规矩 |
 | 引擎 | 记忆与引擎守卫的 id / 版本 / 配置哈希（守卫另含 `onError`）；引擎替 Agent 补上的默认交付物（输出契约、验收、兜底）与默认工具呈现 | 平台机制与默认组件升级前后可以区分 |
 | 能力快照 | MCP 工具列表哈希、skill 内容哈希、子 agent 指纹 | 追溯这次到底用了什么 |
 | 模型配置 | 端口声明的调用参数（`ModelPort.settings`）：AI SDK 适配器为厂商、推理档位、是否丢弃历史推理、`providerOptions`、顶层 `reasoning` 与 header 名（不含 header 值） | 平台改了模型参数，前后运行可以区分 |
@@ -1161,7 +1161,8 @@ interface ToolDef {
     maxOutputChars?: number                    // 默认 8KB
   }
   semantics?: {                                // 供判定和监督使用
-    intent?: { kind: 'complete' | 'await_input' | 'stop'; code: string }
+    intent?: { kind: 'complete' | 'await_input' | 'stop'; code: string;
+               reply?: string }              // 参数里给委托人看的那段话所在的字段
     repeatable?: boolean                       // 轮询类工具，封路与无新信息守卫不统计
   }
 }
@@ -1288,7 +1289,7 @@ interface Component {
 }
 interface RunInfo {
   runId: string; parentRunId?: string; rootRunId: string
-  environment: { name: string; principalReachable: boolean }
+  environment: { name: string; principalReachable: boolean; approver: boolean }   // approver：配了审批人
   agent: { id: string; version: string }
   task: { subject?: string; tags?: Record<string, string>; scope?: TaskScope;
           context?: Readonly<Record<string, JsonValue>> }
@@ -1411,13 +1412,16 @@ type Observation = StepFacts
 
 **意图工具**（由能力 `intents()` 提供）
 
-| 工具 | 意图 | code | 委托人联系不上时 |
-|---|---|---|---|
-| `finish` | 完成 | `finish` | 保留 |
-| `ask_user` | 等待输入 | `ask_user` | 排除 |
-| `propose` | 等待输入 | `propose` | 排除 |
-| `report_blocked` | 停止 | `blocked` | 保留 |
+| 工具 | 意图 | code | 给委托人的话（`reply`） | 委托人联系不上时 |
+|---|---|---|---|---|
+| `ask_user` | 等待输入 | `ask_user` | `question` | 排除 |
+| `propose` | 等待输入 | `propose` | `summary` | 排除 |
+| `report_blocked` | 停止 | `blocked` | `reason` | 保留 |
 
+- 完成不需要意图工具：不调用工具、直接给出答复就是完成。原来的 `finish` 已去掉：模型只调它、不写正文时，委托人收不到任何答复。
+- 模型以意图结束、没写正文时，意图参数里 `reply` 字段那段话就是交付给委托人的文本（`RunResult.text`，前端流里是正文），委托人总能收到一句话。
+- `propose` 返回"提议还没有执行：委托人确认后，由你在下一轮调用相应工具执行"：只说"已发送"，下一轮模型会当成已经办理。
+- 执行环境配了审批人时，使用说明写明"需要审批的操作直接调用工具：系统会请审批人决定，并把结果返回给你；不要因为需要审批而自己放弃或改为提议"。不写这一句，模型看到"需要审批"的规定会自己放弃，审批人没有机会决定。
 - 委托人联系不上时，使用说明里会写明"不要在回答里向委托人提问；缺少关键信息无法继续时，调用 report_blocked 说明缺什么"。
 - 意图工具照常走流水线，返回简短确认以保持成对，然后把意图作为一条意见交给判定。
 - 意图工具必须单独调用；和其他工具一起调用时返回 `INTENT_NOT_ALONE`，其余工具照常执行。
@@ -1576,7 +1580,7 @@ MCP 工具在引擎里叫 `<服务器名>__<工具名>`，交给 hook 匹配和�
 | 验收 | 方式 | 不通过时 | 建议模式 |
 |---|---|---|---|
 | 引用核对 `groundingCheck` | 确定性：引号内 ≥ 20 字节的引文和实体名，在语料中找不到就算无法核实；累计 ≥ 2 处不通过。比较前规范化数字（千分位、小数位、百分号）和单位（"万""亿"等） | 提示，列出无法核实的内容，要求修正或删除 | 先用 `shadow` 校准；准确后交互场景用 `annotate`，高风险后台任务用 `gate` |
-| 完成审查 `completionReview`（`createEngine` 默认带上） | 先做风险打分，≥ 3 分才调用模型。打分项：要求执行操作（含预订、购买、支付等）或查找信息（查、搜索、检索、核实等，不含检查、审查）却没调用任何工具 +5；回答结尾在预告动作（"我先查一下""稍等，我马上为你查询""let me look that up"）+5；声称已写入却没有副作用调用 +4；任务有多项但工具调用很少 +3；请求超过 100 字而回答不足 50 字 +2；声称全部完成且已运行 5 步以上 +4；还有未完成的计划项 +3；委托人联系不上而回答在向委托人提问 +3。模型判定未完成、置信度 ≥ 0.5 并列出未完成项，才算不通过；联系不上时判定输入带 `principalReachable: false`，向委托人提问算未完成 | 提示，列出未完成项；缺工具时提示先用 `search_tool`；联系不上时提示直接给出结果或用 `report_blocked` 说明缺什么；回答在预告动作时提示直接调用工具去做 | `gate`，每次运行最多退回 2 次 |
+| 完成审查 `completionReview`（`createEngine` 默认带上） | 先做风险打分，≥ 3 分才调用模型。打分项：要求执行操作（含预订、购买、支付等）或查找信息（查、搜索、检索、核实等，不含检查、审查）却没调用任何工具 +5；回答结尾在预告动作（"我先查一下""稍等，我马上为你查询""let me look that up"）+5；声称已执行（写入、提交、办理、退款、支付、下单、修改等）而本轮没有副作用调用 +4；任务有多项但工具调用很少 +3；请求超过 100 字而回答不足 50 字 +2；声称全部完成且已运行 5 步以上 +4；还有未完成的计划项 +3；委托人联系不上而回答在向委托人提问 +3。结构化交付没有正文时，以提交的结果作为回答（只看正文会被判成"回答为空"）。判定输入带上 `executed`：本轮成功的副作用调用和会话之前各轮的台账，声称已执行却在其中找不到的算未完成。模型判定未完成、置信度 ≥ 0.5 并列出未完成项，才算不通过；联系不上时判定输入带 `principalReachable: false`，向委托人提问算未完成 | 提示，列出未完成项；缺工具时提示先用 `search_tool`；联系不上时提示直接给出结果或用 `report_blocked` 说明缺什么；回答在预告动作时提示直接调用工具去做 | `gate`，每次运行最多退回 2 次 |
 
 验收只给出问题和提示，由主模型自己修正；不改写交付内容。
 

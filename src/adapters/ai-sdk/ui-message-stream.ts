@@ -125,6 +125,11 @@ function createProjector(runId: string, fromSeq: number, archive: RunUIStreamOpt
   let live = new Map<Kind, string>()
   /** 每个调用的审批理由（非影子规则的 ask.summary）。 */
   const asks = new Map<string, string[]>()
+  /** 意图工具参数里给委托人看的那段话所在的字段（`ToolIntent.reply`）。 */
+  const replies = new Map<string, string>()
+  /** 本步模型的正文与工具调用：以意图结束、没写正文时，意图的那段话作为正文发出。 */
+  let stepText = ''
+  let stepCalls: ReadonlyArray<{ name: string; input: unknown }> = []
 
   const delta = (kind: Kind, text: string): RunUIMessageChunk[] => {
     const id = `${kind}-${step}`
@@ -176,6 +181,9 @@ function createProjector(runId: string, fromSeq: number, archive: RunUIStreamOpt
     async event(e: RunEvent): Promise<Item[]> {
       switch (e.t) {
         case 'run_started':
+          for (const cap of e.capabilities) {
+            for (const t of cap.tools) if (t.intent?.reply) replies.set(t.name, t.intent.reply)
+          }
           return group(e.seq, [{ type: 'start', messageId: runId, messageMetadata: { runId } }])
         case 'step_started':
           step = e.step
@@ -191,6 +199,8 @@ function createProjector(runId: string, fromSeq: number, archive: RunUIStreamOpt
             toolName: c.name,
             input: c.input,
           }))
+          stepText = response.text
+          stepCalls = response.toolCalls
           const text = settle({ reasoning: response.reasoning?.text ?? '', text: response.text })
           return group(e.seq, [...text, ...calls])
         }
@@ -225,6 +235,20 @@ function createProjector(runId: string, fromSeq: number, archive: RunUIStreamOpt
             e.seq,
             toolResult(e, e.seq >= fromSeq ? await readShown(e.shown) : undefined),
           )
+        case 'evaluated': {
+          // 与交付文本同一规则（core/run/state.ts 的候选文本）：委托人在聊天里总能看到一句话。
+          const tool = e.observation.intent?.tool
+          const field = tool === undefined ? undefined : replies.get(tool)
+          if (field === undefined || stepText.trim() !== '') return []
+          const input = stepCalls.find((c) => c.name === tool)?.input
+          const reply =
+            typeof input === 'object' && input !== null
+              ? (input as Record<string, unknown>)[field]
+              : undefined
+          if (typeof reply !== 'string' || reply === '') return []
+          const id = `text-reply-${e.step}`
+          return group(e.seq, [startOf('text', id), deltaOf('text', id, reply), endOf('text', id)])
+        }
         case 'step_ended':
           return group(e.seq, [{ type: 'finish-step' }])
         case 'delivery_checked':

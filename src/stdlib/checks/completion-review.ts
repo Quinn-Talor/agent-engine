@@ -37,7 +37,7 @@ const QUESTION =
 const REQUEST_MARKER =
   /(帮我|替我|给我|请(?!问)|麻烦|\b(?:please|help me|can you|could you|would you)\b)/i
 const WRITE_CLAIM =
-  /(已(?:经)?(?:写入|保存|创建|发送|提交|更新|删除|上传|部署)|\b(?:saved|written|created|sent|submitted|updated|deleted|uploaded|deployed)\b)/i
+  /(已(?:经)?(?:写入|保存|创建|发送|提交|更新|删除|上传|部署|办理|退款|支付|转账|下单|取消|修改)|\b(?:saved|written|created|sent|submitted|updated|deleted|uploaded|deployed)\b)/i
 const ALL_DONE_CLAIM =
   /(全部完成|都已完成|已全部完成|均已完成|\ball (?:tasks |steps |items )?(?:are )?(?:done|completed|finished)\b)/i
 const LIST_ITEM = /^\s*(?:\d+[.、)）]|[-*•])\s*\S/
@@ -55,6 +55,7 @@ const SYSTEM = [
   '根据任务、交付内容、调用过的工具和计划，判断还有哪些要求没有完成。',
   '委托人联系不上时（principalReachable 为 false），回答里向委托人提问、要等对方补充信息才能继续的，算没有完成。',
   '回答只是在预告要做的事（例如"我先查一下"）而没有给出结果的，算没有完成。',
+  '回答里声称已经执行、提交或办理的操作，在 executed（本轮和之前各轮实际执行过的操作）里找不到的，算没有完成；missing 里写明哪项声称不实。',
   '只回答一个 JSON 对象：{"complete": 布尔值, "confidence": 0 到 1 的数, "missing": 未完成事项的字符串数组}。',
 ].join('\n')
 
@@ -66,9 +67,23 @@ const inputOf = (corpus: Corpus) =>
     .map((s) => s.text)
     .join('\n')
 const toolsOf = (corpus: Corpus): Source[] => corpus.sources.filter((s) => s.origin === 'tool')
+/** 实际执行过的操作：本轮成功的有副作用调用，加上会话之前各轮的台账。 */
+const executedOf = (corpus: Corpus): Source[] =>
+  corpus.sources.filter(
+    (s) =>
+      s.origin === 'ledger' ||
+      (s.origin === 'tool' &&
+        (s.effect === 'idempotent' || s.effect === 'side_effect') &&
+        s.isError !== true),
+  )
 const lastPlan = (tools: readonly Source[]) =>
   [...tools].reverse().find((t) => t.toolName === 'update_plan')?.text
 
+/** 交付的回答：正文；结构化交付没有正文时是提交的结果（审查只看正文会把它当成"回答为空"）。 */
+const answerOf = (candidate: Candidate): string =>
+  (candidate.text ?? '').trim() === '' && candidate.output !== undefined
+    ? canonicalJson(candidate.output)
+    : (candidate.text ?? '')
 const announces = (text: string): boolean =>
   ANNOUNCE.test([...text.trim()].slice(-ANNOUNCE_TAIL_CHARS).join(''))
 
@@ -80,15 +95,15 @@ export function riskScore(
 ): number {
   const input = inputOf(corpus)
   const tools = toolsOf(corpus)
-  const text = candidate.text ?? ''
+  const text = answerOf(candidate)
   let score = 0
   const readOnlyQuestion = QUESTION.test(input) && !REQUEST_MARKER.test(input)
   const requested = ACTION_REQUEST.test(input) || LOOKUP_REQUEST.test(input)
   if (requested && !readOnlyQuestion && tools.length === 0) score += 5
   if (announces(text)) score += 5
-  const sideEffects = tools.filter(
-    (t) => (t.effect === 'idempotent' || t.effect === 'side_effect') && t.isError !== true,
-  )
+  // 声称做过某事而本轮没有副作用调用：交给审查模型对照台账（之前各轮做过什么）判断，台账里有别的操作
+  // 不能替这句话作证。
+  const sideEffects = executedOf(corpus).filter((s) => s.origin === 'tool')
   if (WRITE_CLAIM.test(text) && sideEffects.length === 0) score += 4
   const items = input.split('\n').filter((line) => LIST_ITEM.test(line)).length
   if (items >= 3 && tools.length < items) score += 3
@@ -120,7 +135,7 @@ export function completionReview(
 ): Check {
   return {
     id: 'completion',
-    version: '3',
+    version: '5',
     mode: opts.mode ?? 'gate',
     maxAttempts: opts.maxAttempts ?? 2,
     config: { model: opts.model ?? null },
@@ -142,8 +157,11 @@ export function completionReview(
                 role: 'user',
                 content: canonicalJson({
                   task: inputOf(corpus).slice(0, MAX_FIELD_CHARS),
-                  answer: (candidate.text ?? '').slice(0, MAX_FIELD_CHARS),
+                  answer: answerOf(candidate).slice(0, MAX_FIELD_CHARS),
                   tools: tools.map((t) => t.toolName ?? 'tool'),
+                  executed: executedOf(corpus).map((s) =>
+                    s.origin === 'ledger' ? s.text : `本轮已执行 ${s.toolName ?? 'tool'}`,
+                  ),
                   ...(plan !== undefined ? { plan } : {}),
                   ...(reachable ? {} : { principalReachable: false }),
                 }),
@@ -164,7 +182,7 @@ export function completionReview(
           typeof verdict?.confidence === 'number' && verdict.confidence >= MIN_CONFIDENCE
         if (verdict?.complete !== false || !confident || missing.length === 0) return { pass: true }
         const toolHint = tools.length === 0 ? '\n缺少需要的工具时，先用 search_tool 查找。' : ''
-        const announceHint = announces(candidate.text ?? '') ? `\n${ANNOUNCE_HINT}` : ''
+        const announceHint = announces(answerOf(candidate)) ? `\n${ANNOUNCE_HINT}` : ''
         const reachHint = reachable ? '' : `\n${UNREACHABLE_HINT}`
         return {
           pass: false,

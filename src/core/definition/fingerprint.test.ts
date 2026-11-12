@@ -127,9 +127,16 @@ describe('environment and engine fingerprints', () => {
     expect(environmentFingerprint(config({ permissions: [rule] }))).not.toBe(base)
   })
 
-  it('AC-008 ignores the approver implementation', () => {
-    const approver = { approve: async () => ({ approved: true }) }
-    expect(environmentFingerprint(config({ principal: { reachable: true, approver } }))).toBe(base)
+  it('AC-008 records whether there is an approver, not how it decides', () => {
+    const yes = { approve: async () => ({ approved: true }) }
+    const no = { approve: async () => ({ approved: false }) }
+    const withYes = environmentFingerprint(
+      config({ principal: { reachable: true, approver: yes } }),
+    )
+    expect(withYes).not.toBe(base)
+    expect(environmentFingerprint(config({ principal: { reachable: true, approver: no } }))).toBe(
+      withYes,
+    )
   })
 
   it('AC-029 changes with environment guard config', () => {

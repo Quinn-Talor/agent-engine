@@ -79,6 +79,27 @@ describe('riskScore', () => {
     ).toBe(score)
   })
 
+  it.each([
+    ['nothing was executed', []],
+    [
+      'only an earlier turn executed something',
+      [
+        {
+          origin: 'ledger' as const,
+          text: '第 1 轮已执行 update_address {}',
+          toolName: 'update_address',
+        },
+      ],
+    ],
+  ])('sends a claim of a handled refund to review when %s in this turn', (_name, ledger) => {
+    expect(
+      riskScore(
+        candidate('外套的 459 元退款已办理，请留意到账。'),
+        corpus(input('谢谢'), ...ledger),
+      ),
+    ).toBe(4)
+  })
+
   it('does not count a write claim backed by a successful side effect', () => {
     const c = corpus(input('看看'), tool({ effect: 'side_effect' }))
     expect(riskScore(candidate('已保存到文件'), c)).toBe(0)
@@ -184,7 +205,7 @@ describe('completionReview', () => {
   it('AC-022 identifies itself and defaults to gate with two attempts', () => {
     expect(completionReview()).toMatchObject({
       id: 'completion',
-      version: '3',
+      version: '5',
       mode: 'gate',
       maxAttempts: 2,
       config: { model: null },
@@ -195,6 +216,47 @@ describe('completionReview', () => {
       mode: 'annotate',
       maxAttempts: 1,
       config: { model: 'fake:small' },
+    })
+  })
+
+  it('tells the judge what was actually executed, in this turn and earlier ones', async () => {
+    const { ctx, requests } = setup(
+      '{"complete": false, "confidence": 0.9, "missing": ["声称已提交退款审批，但没有执行"]}',
+    )
+    const c = corpus(
+      input('明白了，谢谢'),
+      {
+        origin: 'ledger',
+        text: '第 1 轮已执行 update_address {"orderId":"O4"}',
+        toolName: 'update_address',
+      },
+      tool({ toolName: 'get_order' }),
+    )
+    const verdict = await completionReview()
+      .start(runInfo(), ctx)
+      .accept(candidate('另外，外套的 459 元退款已提交主管审批。'), c)
+    expect(verdict).toMatchObject({ pass: false, issues: ['声称已提交退款审批，但没有执行'] })
+    expect(requests[0]!.system).toContain('executed')
+    expect(JSON.parse(requests[0]!.messages[0]!.content as string)).toMatchObject({
+      executed: ['第 1 轮已执行 update_address {"orderId":"O4"}'],
+    })
+  })
+
+  it('reviews the structured output as the answer when there is no text', async () => {
+    const { ctx, requests } = setup('{"complete": true, "confidence": 0.9, "missing": []}')
+    const c = corpus(
+      input('生成售后工单'),
+      tool({
+        toolName: 'update_plan',
+        text: '<tool_output>\n计划已更新：已完成 2/3 项\n</tool_output>',
+      }),
+    )
+    const structured = { ...candidate(''), output: { orderId: 'O1002', action: 'contact_carrier' } }
+    expect(await completionReview().start(runInfo(), ctx).accept(structured, c)).toEqual({
+      pass: true,
+    })
+    expect(JSON.parse(requests[0]!.messages[0]!.content as string)).toMatchObject({
+      answer: '{"action":"contact_carrier","orderId":"O1002"}',
     })
   })
 
@@ -222,6 +284,7 @@ describe('completionReview', () => {
       task: '请创建一个文件',
       answer: '好的',
       tools: [],
+      executed: [],
     })
   })
 

@@ -284,6 +284,21 @@ function onDelivery(state: RunState, e: Extract<RunEvent, { t: 'delivery_checked
   }
 }
 
+/**
+ * 候选文本：模型的正文；正文为空、以声明了 `reply` 的意图结束时，取意图参数里给委托人看的那段话
+ * （ask_user 的问题、report_blocked 的原因……），委托人总能收到一句话。
+ */
+function candidateText(s: RunState, tool: string | undefined, input: unknown): string {
+  const text = s.response?.text ?? ''
+  if (text.trim().length > 0 || tool === undefined) return text
+  const field = s.tools[tool]?.intent?.reply
+  const reply =
+    field !== undefined && typeof input === 'object' && input !== null
+      ? (input as Record<string, unknown>)[field]
+      : undefined
+  return typeof reply === 'string' ? reply : text
+}
+
 export function apply(state: RunState, e: RunEvent): RunState {
   if (state.phase === 'ended') throw new Error('unreachable: event after run_ended')
   const s: RunState = { ...state, lastSeq: e.seq, lastAt: e.at }
@@ -492,7 +507,7 @@ export function apply(state: RunState, e: RunEvent): RunState {
         seenOutputs: [...seen],
         candidate: {
           step: e.step,
-          text: s.response?.text ?? '',
+          text: candidateText(s, intent?.tool, intentCall?.input),
           ...(intent
             ? {
                 intent: {

@@ -3,10 +3,10 @@
 import type { PrepareCtx } from '../../contracts/capability.js'
 import type { RunInfo } from '../../contracts/component.js'
 
-export const runInfo = (principalReachable = true): RunInfo => ({
+export const runInfo = (principalReachable = true, approver = false): RunInfo => ({
   runId: 'r1',
   rootRunId: 'r1',
-  environment: { name: 'env', principalReachable },
+  environment: { name: 'env', principalReachable, approver },
   agent: { id: 'a' },
   task: {},
   model: { ref: 'fake:m', contextLimit: 1000 },

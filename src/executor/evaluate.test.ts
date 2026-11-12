@@ -24,7 +24,7 @@ import { createEvaluator, type EvaluateDeps } from './evaluate.js'
 const run: RunInfo = {
   runId: 'r1',
   rootRunId: 'r1',
-  environment: { name: 'env', principalReachable: true },
+  environment: { name: 'env', principalReachable: true, approver: false },
   agent: { id: 'a' },
   task: { goal: '订一张去东京的机票' },
   model: { ref: 'fake:m', contextLimit: 10_000 },
@@ -427,7 +427,7 @@ describe('createEvaluator', () => {
 
   it('finalizes instead of waiting for input when nobody can answer, after warning once', async () => {
     const s = setup({
-      run: { ...run, environment: { name: 'bg', principalReachable: false } },
+      run: { ...run, environment: { name: 'bg', principalReachable: false, approver: false } },
       guards: { task: [guard('ask', () => ({ awaitInput: { code: 'need_info' } }))] },
     })
     const first = await s.evaluator.evaluate(working())

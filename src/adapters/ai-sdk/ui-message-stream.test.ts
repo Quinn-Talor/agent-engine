@@ -389,6 +389,31 @@ describe('runToUIMessageStream: mapping', () => {
     })
   })
 
+  it('shows the reply of an intent as text when the model wrote none', async () => {
+    const askUser = fakeTool({
+      name: 'ask_user',
+      effect: 'none',
+      intent: { kind: 'await_input', code: 'ask_user', reply: 'question' },
+      result: '问题已发送给委托人',
+    })
+    const { start, archive } = setup({
+      replies: [{ toolCalls: [{ id: 'q1', name: 'ask_user', input: { question: '几号入职？' } }] }],
+      tools: [askUser],
+    })
+    const run = start()
+    const chunks = await collect(runToUIMessageStream(run, { archive }))
+    expect(chunks.filter((c) => c.type.startsWith('text-'))).toEqual([
+      { type: 'text-start', id: 'text-reply-1' },
+      { type: 'text-delta', id: 'text-reply-1', delta: '几号入职？' },
+      { type: 'text-end', id: 'text-reply-1' },
+    ])
+    expect((await run.result).text).toBe('几号入职？')
+    const message = await build(chunks)
+    expect(message?.parts.filter((p) => p.type === 'text')).toEqual([
+      expect.objectContaining({ text: '几号入职？' }),
+    ])
+  })
+
   it('AC-006 drops a returned draft, and a draft replaced by the fallback', async () => {
     const strict = (bad: (text: string) => boolean): Partial<AgentDef> => {
       const defaults = testDefaults().deliverable

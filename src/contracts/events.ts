@@ -66,7 +66,13 @@ export type RunEvent = { seq: number; at: number } & (
       t: 'run_started'
       agent: AgentSnapshot
       task: TaskSnapshot
-      environment: { name: string; fingerprint: string; principalReachable: boolean }
+      /** `approver`：执行环境配了审批人（为 false 时不写）。 */
+      environment: {
+        name: string
+        fingerprint: string
+        principalReachable: boolean
+        approver?: true
+      }
       engine: { fingerprint: string }
       capabilities: CapabilitySnapshot[]
       unavailable: Array<{ capability: string; reason: string }>

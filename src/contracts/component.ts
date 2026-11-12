@@ -24,7 +24,8 @@ export interface RunInfo {
   runId: string
   parentRunId?: string
   rootRunId: string
-  environment: { name: string; principalReachable: boolean }
+  /** `approver`：执行环境配了审批人，需要审批的调用会请它决定。 */
+  environment: { name: string; principalReachable: boolean; approver: boolean }
   /** `version` 是可选的业务标签（设计 §1.4）。 */
   agent: { id: string; version?: string }
   task: {
@@ -217,7 +218,8 @@ export interface GuardGroups {
 /** 语料：任务输入 + history + 工具输出中的 shown（设计 §6.3）。 */
 export interface Corpus {
   sources: ReadonlyArray<{
-    origin: 'input' | 'history' | 'tool'
+    /** `ledger`：会话里之前各轮执行过的副作用（副作用台账）。 */
+    origin: 'input' | 'history' | 'tool' | 'ledger'
     text: string
     callId?: string
     /** 工具来源：工具名、副作用类型、是否出错，供完成审查等验收使用。 */

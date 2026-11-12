@@ -46,7 +46,7 @@ const DEFAULT_TRIGGER = 0.8
 const RUN: RunInfo = {
   runId: 'conformance-run',
   rootRunId: 'conformance-run',
-  environment: { name: 'conformance', principalReachable: true },
+  environment: { name: 'conformance', principalReachable: true, approver: false },
   agent: { id: 'conformance-agent' },
   task: { subject: 'conformance', input: '整理东京的天气' },
   model: { ref: 'fake:model', contextLimit: 8000 },

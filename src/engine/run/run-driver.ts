@@ -359,7 +359,11 @@ export function startRun(
       runId,
       ...(parent ? { parentRunId: parent.runId } : {}),
       rootRunId: lineage.rootRunId,
-      environment: { name: env.config.name, principalReachable: env.config.principal.reachable },
+      environment: {
+        name: env.config.name,
+        principalReachable: env.config.principal.reachable,
+        approver: env.config.principal.approver !== undefined,
+      },
       agent: { id: agent.id, ...(agent.version !== undefined ? { version: agent.version } : {}) },
       task: {
         ...(subject !== undefined ? { subject } : {}),
@@ -442,6 +446,7 @@ export function startRun(
           name: env.config.name,
           fingerprint: env.fingerprint,
           principalReachable: env.config.principal.reachable,
+          ...(env.config.principal.approver !== undefined ? { approver: true as const } : {}),
         },
         engine: { fingerprint: engine.fingerprint },
         capabilities: p.snapshots,
@@ -527,7 +532,12 @@ export function startRun(
             })
           }
         }
-        return buildCorpus({ input: task.input, history, toolOutputs })
+        return buildCorpus({
+          input: task.input,
+          history,
+          toolOutputs,
+          ...(claim ? { ledger: claim.derived.ledger } : {}),
+        })
       }
       const composer = createComposer({
         run,

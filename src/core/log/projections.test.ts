@@ -359,6 +359,26 @@ describe('qualityOf', () => {
 })
 
 describe('buildCorpus', () => {
+  it('adds the side effects of earlier turns from the ledger', () => {
+    const corpus = buildCorpus({
+      input: [],
+      history: [],
+      toolOutputs: [],
+      ledger: [
+        { turn: 1, tool: 'refund_order', input: '{"orderId":"O1"}', status: 'executed' },
+        { turn: 2, tool: 'send_mail', input: '{}', status: 'possibly_executed' },
+      ],
+    })
+    expect(corpus.sources).toEqual([
+      {
+        origin: 'ledger',
+        text: '第 1 轮已执行 refund_order {"orderId":"O1"}',
+        toolName: 'refund_order',
+      },
+      { origin: 'ledger', text: '第 2 轮可能已执行 send_mail {}', toolName: 'send_mail' },
+    ])
+  })
+
   it('AC-007 collects input, history and tool outputs', () => {
     const corpus = buildCorpus({
       input: [

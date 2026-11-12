@@ -399,3 +399,50 @@ describe('feature tour: multimodal input end to end', () => {
     expect(logged).toHaveLength(shots)
   })
 })
+
+describe('feature tour: claims are checked against what was executed', () => {
+  it('sends back a claim that no turn executed, and passes the corrected answer', async () => {
+    const verdicts: string[] = []
+    const model = fakeModel({
+      model: 'main',
+      replies: [
+        { toolCalls: [{ id: 'r1', name: 'refund', input: { orderId: 'O1' } }] },
+        { text: '订单 O1 退款完成。' },
+        { text: '您的退款已办理，收货地址也已修改。' },
+        (input) => {
+          verdicts.push(String(input.messages.at(-1)!.content))
+          return {
+            text: '{"complete": false, "confidence": 0.9, "missing": ["声称已修改地址，但没有执行"]}',
+          }
+        },
+        { text: '您的退款已办理，地址还没有修改。' },
+        (input) => {
+          verdicts.push(String(input.messages.at(-1)!.content))
+          return { text: '{"complete": true, "confidence": 0.9, "missing": []}' }
+        },
+      ],
+    })
+    const engine = createEngine({
+      services: { models: modelHub({ providers: [model], default: model.ref }), logger: quiet },
+    })
+    const env = engine.environment({ name: 'shop', principal: { reachable: true } })
+    const refund = fakeTool({ name: 'refund', effect: 'side_effect', result: '已退款' })
+    const agent = defineAgent({
+      id: 'clerk',
+      instructions: [{ role: 'system', parts: [{ type: 'text', text: '你是客服' }] }],
+      capabilities: [tools([refund])],
+    })
+    const say = (text: string) =>
+      defineTask({ input: [{ role: 'user', parts: [{ type: 'text', text }] }] })
+    expect(await env.start(agent, say('给 O1 退款'), { session: 's' }).result).toMatchObject({
+      status: 'completed',
+    })
+    const second = await env.start(agent, say('都办好了吗'), { session: 's' }).result
+    expect(second).toMatchObject({ status: 'completed', text: '您的退款已办理，地址还没有修改。' })
+    expect(verdicts).toHaveLength(2)
+    expect(JSON.parse(verdicts[0]!)).toMatchObject({
+      executed: ['第 1 轮已执行 refund {"orderId":"O1"}'],
+    })
+    expect(refund.calls).toHaveLength(1)
+  })
+})

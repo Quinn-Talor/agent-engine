@@ -85,6 +85,7 @@ function runInfoOf(events: readonly RunEvent[]): RunInfo {
     environment: {
       name: started.environment.name,
       principalReachable: started.environment.principalReachable,
+      approver: started.environment.approver === true,
     },
     agent: {
       id: started.agent.id,
@@ -195,7 +196,13 @@ export async function regressionReplay(input: RegressionInput): Promise<Regressi
       }
     }
     const content = await logged()
-    return buildCorpus({ input: content.input, history: content.history, toolOutputs })
+    const ledger = started.session?.window.ledger
+    return buildCorpus({
+      input: content.input,
+      history: content.history,
+      toolOutputs,
+      ...(ledger ? { ledger } : {}),
+    })
   }
   const evaluator = createEvaluator({
     run,

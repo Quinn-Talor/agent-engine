@@ -100,7 +100,7 @@ describe('scenarios', () => {
     const h = engineWith([
       { toolCalls: [{ id: 'b1', name: 'book', input: { flight: 'NH1' } }] },
       { toolCalls: [{ id: 'q1', name: 'ask_user', input: { question: '要靠窗还是靠过道？' } }] },
-      { toolCalls: [{ id: 'f1', name: 'finish', input: { summary: '已订 NH1 靠窗座位' } }] },
+      { text: '已订 NH1 靠窗座位' },
     ])
     const env = h.engine.environment({
       name: 'interactive',
@@ -122,15 +122,17 @@ describe('scenarios', () => {
     )
     const asked = await runToEnd(first)
     assertInvariants(asked.events)
+    // 模型只调用了 ask_user、没写正文：问题本身就是给委托人的答复。
     expect(asked.result).toMatchObject({
       status: 'awaiting_input',
       code: 'ask_user',
+      text: '要靠窗还是靠过道？',
       intent: { tool: 'ask_user', input: { question: '要靠窗还是靠过道？' } },
     })
     expect(approvals).toEqual(['book'])
     expect(book.calls).toHaveLength(1)
     expect(toolNames(asked.events)).toEqual(
-      expect.arrayContaining(['ask_user', 'propose', 'finish', 'lookup', 'book']),
+      expect.arrayContaining(['ask_user', 'propose', 'lookup', 'book']),
     )
 
     const history: ModelMessage[] = [
@@ -141,11 +143,7 @@ describe('scenarios', () => {
       env.start(agent, defineTask({ input: [userText('靠窗')], history })),
     )
     assertInvariants(second.events)
-    expect(second.result).toMatchObject({
-      status: 'completed',
-      code: 'finish',
-      intent: { tool: 'finish', input: { summary: '已订 NH1 靠窗座位' } },
-    })
+    expect(second.result).toMatchObject({ status: 'completed', text: '已订 NH1 靠窗座位' })
     const seen = h.model.inputs[2]!.messages
     expect(seen).toEqual(
       expect.arrayContaining([
@@ -193,7 +191,8 @@ describe('scenarios', () => {
       text: '今日数据源没有更新，日报未生成；已查询 1 次数据源，未执行写操作。',
     })
     const names = toolNames(events)
-    expect(names).toEqual(expect.arrayContaining(['finish', 'report_blocked', 'lookup']))
+    expect(names).toEqual(expect.arrayContaining(['report_blocked', 'lookup']))
+    expect(names).not.toContain('finish')
     expect(names).not.toContain('ask_user')
     expect(names).not.toContain('propose')
     expect(h.model.inputs[0]!.tools.map((t) => t.name)).not.toContain('ask_user')

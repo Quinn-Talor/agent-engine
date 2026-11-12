@@ -19,7 +19,7 @@ import {
 const runInfo: RunInfo = {
   runId: 'run-1',
   rootRunId: 'run-1',
-  environment: { name: 'test', principalReachable: true },
+  environment: { name: 'test', principalReachable: true, approver: false },
   agent: { id: 'helper' },
   task: {},
   model: { ref: 'fake:main', contextLimit: 100_000 },

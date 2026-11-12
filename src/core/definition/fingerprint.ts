@@ -92,11 +92,13 @@ export function isNoticeProvider(n: unknown): n is NoticeProvider {
   return typeof (n as { provide?: unknown }).provide === 'function'
 }
 
-/** 执行环境指纹：规矩本身；审批由应用实现，不参与。 */
+/** 执行环境指纹：规矩本身；审批人只记有没有，怎么审批由应用实现，不参与。 */
 export function environmentFingerprint(config: EnvironmentConfig): string {
   return hashOf({
     name: config.name,
     principalReachable: config.principal.reachable,
+    // 有没有审批人会改变给模型的说明（需要审批的操作直接调用）；审批人怎么判由应用实现，不参与。
+    approver: config.principal.approver !== undefined,
     notice: (config.notice ?? []).map((n) =>
       isNoticeProvider(n) ? { provider: componentIdentity(n) } : { segment: hashOf(n) },
     ),

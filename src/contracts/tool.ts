@@ -21,6 +21,11 @@ export interface ToolAccess {
 export interface ToolIntent {
   kind: 'complete' | 'await_input' | 'stop'
   code: string
+  /**
+   * 参数里给委托人看的那段话所在的字段（例如 ask_user 的 question）。模型以这个意图结束、没写正文时，
+   * 这段话就是交付给委托人的文本。
+   */
+  reply?: string
 }
 
 export interface ToolDef {

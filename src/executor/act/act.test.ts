@@ -17,7 +17,7 @@ import { prepareTool, type PreparedTool } from './tools.js'
 const run: RunInfo = {
   runId: 'r1',
   rootRunId: 'r1',
-  environment: { name: 'env', principalReachable: true },
+  environment: { name: 'env', principalReachable: true, approver: false },
   agent: { id: 'a' },
   task: {},
   model: { ref: 'fake:m', contextLimit: 1000 },
