@@ -449,6 +449,60 @@ describe('feature tour: claims are checked against what was executed', () => {
     })
     expect(refund.calls).toHaveLength(1)
   })
+
+  it('sends back a refund claimed in a roundabout way after the approver turned it down', async () => {
+    const verdicts: string[] = []
+    const model = fakeModel({
+      model: 'main',
+      replies: [
+        { toolCalls: [{ id: 'r1', name: 'refund', input: { orderId: 'O1' } }] },
+        { text: '订单 O1 已为您退款。' },
+        (input) => {
+          verdicts.push(String(input.messages.at(-1)!.content))
+          return {
+            text: '{"complete": false, "confidence": 0.9, "missing": ["声称已退款，但审批被拒，没有执行"]}',
+          }
+        },
+        { text: '退款审批没有通过，订单 O1 还没有退款。' },
+      ],
+    })
+    const engine = createEngine({
+      services: { models: modelHub({ providers: [model], default: model.ref }), logger: quiet },
+    })
+    const env = engine.environment({
+      name: 'shop',
+      principal: { reachable: true, approver: { approve: async () => ({ approved: false }) } },
+      permissions: [riskApproval({ mode: 'ask-high' })],
+    })
+    const refund = fakeTool({
+      name: 'refund',
+      risk: 'high',
+      effect: 'side_effect',
+      result: '已退款',
+    })
+    const agent = defineAgent({
+      id: 'clerk',
+      instructions: [{ role: 'system', parts: [{ type: 'text', text: '你是客服' }] }],
+      capabilities: [tools([refund])],
+    })
+    const { result, events } = await runToEnd(
+      env.start(
+        agent,
+        defineTask({ input: [{ role: 'user', parts: [{ type: 'text', text: '给 O1 退款' }] }] }),
+      ),
+    )
+    expect(result).toMatchObject({
+      status: 'completed',
+      text: '退款审批没有通过，订单 O1 还没有退款。',
+    })
+    expect(refund.calls).toHaveLength(0)
+    expect(verdicts).toHaveLength(1)
+    expect(JSON.parse(verdicts[0]!)).toMatchObject({ answer: '订单 O1 已为您退款。', executed: [] })
+    expect(events.filter((e) => e.t === 'delivery_checked').map((e) => e.outcome)).toEqual([
+      'returned',
+      'delivered',
+    ])
+  })
 })
 
 describe('feature tour: a session turn read back from the archive is ready to evaluate', () => {

@@ -36,8 +36,31 @@ const QUESTION =
   /([?？]\s*$|吗\s*$|^\s*(?:怎么|怎样|如何|为什么|是否|(?:how|what|why|when|where|which|who|is|are|does|do|should)\b))/i
 const REQUEST_MARKER =
   /(帮我|替我|给我|请(?!问)|麻烦|\b(?:please|help me|can you|could you|would you)\b)/i
-const WRITE_CLAIM =
-  /(已(?:经)?(?:写入|保存|创建|发送|提交|更新|删除|上传|部署|办理|退款|支付|转账|下单|取消|修改)|\b(?:saved|written|created|sent|submitted|updated|deleted|uploaded|deployed)\b)/i
+/**
+ * 已(经)和动作之间可以有的状语：介词短语（为您、帮您、把订单 O1、向原账户、按您的要求）、副词（成功、全额）、
+ * 带出动作的虚化动词（完成、发起、申请）。只认这些状语，"已超过可退款时间""已收到您的退款申请"
+ * 都不是声称执行；介词的宾语不跨标点、不含否定字，"已经无法办理""已在配送中无法取消"也不是。
+ */
+const ADVERBIAL = String.raw`(?:(?:为|帮|给|替|向|对|将|把|从|在|于|通过|按照?|根据)[^，。！？；：,;:!?\n不没未无]{1,10}?|成功|顺利|全部|全额|一并|重新|再次|立即|及时|都|均|也|完成|进行|发起|安排|执行|申请)`
+/** 声称已执行写操作：已(经) + 至多三个状语 + 动作（"取消不了""提交失败"不算），或英文的过去分词。 */
+const WRITE_CLAIM = new RegExp(
+  String.raw`已(?:经)?${ADVERBIAL}{0,3}(?:写入|保存|创建|发送|提交|更新|删除|上传|部署|办理|退款|支付|转账|下单|取消|修改)(?!不了|不成|失败)|\b(?:saved|written|created|sent|submitted|updated|deleted|uploaded|deployed|refunded|paid|transferred|cancell?ed|modified)\b`,
+  'i',
+)
+/** 子句在逗号、句号一类标点处断开；半角问号和句点只在句末断开，不断开 URL 和小数。 */
+const CLAUSE_BREAK = /(?<=[，。！？；,;!\n])|(?<=[.?])(?=[\s"'”’)）\]】])/
+/** 问句子句：问号或"吗"结尾。 */
+const QUESTION_CLAUSE = /(?:[？?]|吗[，,。.！!]?)\s*$/
+/** 声称之前出现这些词，说的是疑问、条件或否定，不是声称做过。 */
+const NOT_ASSERTED =
+  /(是否|有没有|是不是|如果|假如|若|没|未|无法|不能|不是|并非|\b(?:not|never|cannot|unable|failed|if|whether)\b|n't\b)/i
+/** 回答在声称执行过写操作：某个陈述子句里有 WRITE_CLAIM，且它前面没有疑问、条件或否定。 */
+const claimsExecution = (text: string): boolean =>
+  text.split(CLAUSE_BREAK).some((clause) => {
+    if (QUESTION_CLAUSE.test(clause)) return false
+    const claim = WRITE_CLAIM.exec(clause)
+    return claim !== null && !NOT_ASSERTED.test(clause.slice(0, claim.index))
+  })
 const ALL_DONE_CLAIM =
   /(全部完成|都已完成|已全部完成|均已完成|\ball (?:tasks |steps |items )?(?:are )?(?:done|completed|finished)\b)/i
 const LIST_ITEM = /^\s*(?:\d+[.、)）]|[-*•])\s*\S/
@@ -104,7 +127,7 @@ export function riskScore(
   // 声称做过某事而本轮没有副作用调用：交给审查模型对照台账（之前各轮做过什么）判断，台账里有别的操作
   // 不能替这句话作证。
   const sideEffects = executedOf(corpus).filter((s) => s.origin === 'tool')
-  if (WRITE_CLAIM.test(text) && sideEffects.length === 0) score += 4
+  if (claimsExecution(text) && sideEffects.length === 0) score += 4
   const items = input.split('\n').filter((line) => LIST_ITEM.test(line)).length
   if (items >= 3 && tools.length < items) score += 3
   if ([...input].length > 100 && [...text].length < 50) score += 2
@@ -135,7 +158,7 @@ export function completionReview(
 ): Check {
   return {
     id: 'completion',
-    version: '5',
+    version: '6',
     mode: opts.mode ?? 'gate',
     maxAttempts: opts.maxAttempts ?? 2,
     config: { model: opts.model ?? null },
