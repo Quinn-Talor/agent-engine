@@ -61,7 +61,7 @@
 
 | 名称 | 代码 | 指什么 |
 |---|---|---|
-| 引擎 | `Engine`，包名 `agent-engine` | 平台：平台服务 + 运行机制（记忆、监督） |
+| 引擎 | `Engine`，包名 `@talor/agent-engine` | 平台：平台服务 + 运行机制（记忆、监督） |
 | 执行环境 | `Environment` | 组织的规矩：委托人、须知、权限、守卫、上限 |
 | Agent | `Agent` | 角色：身份与指令、能力、工具箱、默认交付物、模型偏好 |
 | 任务 | `Task` | 工单：输入、背景、作业范围、交付物、目标、守卫、预算 |
@@ -313,7 +313,7 @@ interface RunResult {
   toolCalls: number
 }
 
-// —— 前端流（agent-engine/adapters/ai-sdk，需要 ai）——
+// —— 前端流（@talor/agent-engine/adapters/ai-sdk，需要 ai）——
 function runToUIMessageStream(run: Run, opts?: RunUIStreamOptions): ReadableStream<RunUIMessageChunk>
 function runToUIMessageStreamResponse(run: Run,
   opts?: RunUIStreamOptions & { headers?: Record<string, string> }): Response
@@ -1728,7 +1728,7 @@ Agent 和任务的定义见 §4.7。
 
 ## 13. 测试体系（`testing/`）
 
-测试工具从子路径 `agent-engine/testing` 导入，不在包入口里（§14）。
+测试工具从子路径 `@talor/agent-engine/testing` 导入，不在包入口里（§14）。
 
 | 工具 | 用途 |
 |---|---|
@@ -1760,8 +1760,8 @@ Agent 和任务的定义见 §4.7。
 src/
   index.ts       包入口 agent-engine：应用 API + 标准组件 + 不依赖外部库的适配器 + 带默认组件的 createEngine
   api.ts         应用 API：业务对象与契约、定义函数、平台服务、引擎装配、读运行日志的投影与重放
-  sdk.ts         组件作者 API agent-engine/sdk：应用 API + 实现组件、适配器、运行档案用的核心函数与平台机制
-  testing.ts     测试工具 agent-engine/testing
+  sdk.ts         组件作者 API @talor/agent-engine/sdk：应用 API + 实现组件、适配器、运行档案用的核心函数与平台机制
+  testing.ts     测试工具 @talor/agent-engine/testing
   contracts/     业务对象与事件契约；全部组件接口；MCP 与 hook 端口
   core/          纯函数，按领域分组
     run/           流程状态机、视图布局、估算器、种子随机数
@@ -1779,7 +1779,7 @@ src/
 test/
   arch/          依赖方向、项目文档与仓库配置的一致性
   integration/   引擎级测试，按主题分组：lifecycle、supervision、mcp、components
-examples/        按应用的写法使用包名（agent-engine、agent-engine/testing），自带 tsconfig；
+examples/        按应用的写法使用包名（@talor/agent-engine、@talor/agent-engine/testing），自带 tsconfig；
   legal-consult/   律所劳动争议咨询平台：覆盖每一类组件的完整示例
 ```
 
@@ -1793,12 +1793,12 @@ examples/        按应用的写法使用包名（agent-engine、agent-engine/te
 
 | 子路径 | 内容 | 另外安装 |
 |---|---|---|
-| `agent-engine` | 应用 API、标准组件、`createEngine`、`mcpHost`（第一次连接时才加载 MCP 适配器）、`hookRunner`、`consoleLogger` | 用 MCP 时装 `@modelcontextprotocol/sdk` |
-| `agent-engine/sdk` | 组件作者 API | — |
-| `agent-engine/testing` | 测试工具（§13） | — |
-| `agent-engine/adapters/ai-sdk` | `aiSdkProvider`；前端流 `runToUIMessageStream`、`runToUIMessageStreamResponse`（§2） | `ai` |
-| `agent-engine/adapters/sqlite` | `sqliteArchive` | `better-sqlite3` |
-| `agent-engine/adapters/mcp-stdio`、`agent-engine/adapters/mcp-http` | `stdioConnect`、`httpConnect` | `@modelcontextprotocol/sdk` |
+| `@talor/agent-engine` | 应用 API、标准组件、`createEngine`、`mcpHost`（第一次连接时才加载 MCP 适配器）、`hookRunner`、`consoleLogger` | 用 MCP 时装 `@modelcontextprotocol/sdk` |
+| `@talor/agent-engine/sdk` | 组件作者 API | — |
+| `@talor/agent-engine/testing` | 测试工具（§13） | — |
+| `@talor/agent-engine/adapters/ai-sdk` | `aiSdkProvider`；前端流 `runToUIMessageStream`、`runToUIMessageStreamResponse`（§2） | `ai` |
+| `@talor/agent-engine/adapters/sqlite` | `sqliteArchive` | `better-sqlite3` |
+| `@talor/agent-engine/adapters/mcp-stdio`、`@talor/agent-engine/adapters/mcp-http` | `stdioConnect`、`httpConnect` | `@modelcontextprotocol/sdk` |
 
 `ai`、`@modelcontextprotocol/sdk`、`better-sqlite3` 都是可选的 peer 依赖：应用和引擎用同一份，模型实例和连接对象不会因为装了两份而对不上。
 

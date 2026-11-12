@@ -1,7 +1,7 @@
 // 跑一遍全部场景，打印办案记录和结果。先构建再运行（Node ≥ 22.18 直接执行 TypeScript）：
 //   npm run demo:legal
 
-import { retrospect, retrospective, supervisionStats } from 'agent-engine'
+import { retrospect, retrospective, supervisionStats } from '@talor/agent-engine'
 import type { Opinion } from './domain.ts'
 import { createLegalPlatform } from './platform.ts'
 import { SCENARIOS } from './scenarios.ts'

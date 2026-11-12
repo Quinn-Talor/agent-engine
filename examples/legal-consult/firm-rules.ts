@@ -11,7 +11,7 @@ import {
   type NoticeProvider,
   type PermissionRule,
   type Segment,
-} from 'agent-engine'
+} from '@talor/agent-engine'
 import { FIRM_CLIENTS, OpinionSchema } from './domain.ts'
 
 const system = (text: string): Segment => ({ role: 'system', parts: [{ type: 'text', text }] })

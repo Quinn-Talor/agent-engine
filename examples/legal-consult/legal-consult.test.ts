@@ -2,8 +2,8 @@
 // 再用回归重放确认"改了组件之后，旧日志上的裁决不变"。
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { regressionReplay, standardGuards, type RunEvent } from 'agent-engine'
-import { assertInvariants, conformance, sessionLogIssues } from 'agent-engine/testing'
+import { regressionReplay, standardGuards, type RunEvent } from '@talor/agent-engine'
+import { assertInvariants, conformance, sessionLogIssues } from '@talor/agent-engine/testing'
 import { citationsGrounded, legalOpinion } from './deliverable.ts'
 import type { Opinion } from './domain.ts'
 import { clientConsentRule, disclaimerRequired, noOutcomePromise } from './firm-rules.ts'

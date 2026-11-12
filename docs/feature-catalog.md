@@ -147,7 +147,7 @@ hook 在独立进程组里跑，带超时，取消时结束整个进程组，环
 
 `runToUIMessageStream` / `runToUIMessageStreamResponse`：运行转成 AI SDK UI message stream，`useChat` 直接用；支持从头回放与按 `Last-Event-ID` 续流；审批状态体现在工具部件上。代码 `src/adapters/ai-sdk/ui-message-stream.ts`；测试 `ui-message-stream.test.ts`、`examples/chat-endpoint`。
 
-## 14. 测试工具（`agent-engine/testing`）
+## 14. 测试工具（`@talor/agent-engine/testing`）
 
 `fakeModel`、`fakeTool`、`fakeMcpServer`、`FakeClock`、`runToEnd`、`assertInvariants`、`replay`、`chaos`、`conformance`（组件规约检查）、`archiveStoreContract`（自定义档案的契约测试）、`sessionLogIssues`。
 

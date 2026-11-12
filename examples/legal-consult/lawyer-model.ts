@@ -9,8 +9,8 @@ import type {
   ReasoningPart,
   ToolCallPart,
   ToolResultPart,
-} from 'agent-engine'
-import type { FakeReply } from 'agent-engine/testing'
+} from '@talor/agent-engine'
+import type { FakeReply } from '@talor/agent-engine/testing'
 import { CITATION_HINT, type Opinion } from './domain.ts'
 
 type Part = ContentPart | ReasoningPart | ToolCallPart | ToolResultPart

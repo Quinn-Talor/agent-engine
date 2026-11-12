@@ -7,11 +7,11 @@ export default defineConfig({
   // 示例按应用的写法 import 包名；测试时指向源码，不必先构建。
   resolve: {
     alias: [
-      { find: /^agent-engine$/, replacement: src('index.ts') },
-      { find: /^agent-engine\/sdk$/, replacement: src('sdk.ts') },
-      { find: /^agent-engine\/testing$/, replacement: src('testing.ts') },
+      { find: /^@talor\/agent-engine$/, replacement: src('index.ts') },
+      { find: /^@talor\/agent-engine\/sdk$/, replacement: src('sdk.ts') },
+      { find: /^@talor\/agent-engine\/testing$/, replacement: src('testing.ts') },
       {
-        find: /^agent-engine\/adapters\/ai-sdk$/,
+        find: /^@talor\/agent-engine\/adapters\/ai-sdk$/,
         replacement: src('adapters/ai-sdk/ai-sdk-provider.ts'),
       },
     ],

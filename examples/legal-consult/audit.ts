@@ -1,7 +1,7 @@
 // 审计订阅者：把运行日志翻译成律所能看懂的办案记录。运行日志是唯一的事实来源，
 // 这里只做投影，不改运行；订阅时传 { children: true } 一并收到子运行（委托的案例检索）。
 
-import type { RunEvent, RunSubscriber, Verdict } from 'agent-engine'
+import type { RunEvent, RunSubscriber, Verdict } from '@talor/agent-engine'
 
 const clip = (s: string, n = 60) => {
   const line = s.replace(/\s*\n\s*/g, ' ')

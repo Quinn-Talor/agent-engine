@@ -39,8 +39,8 @@ import {
   type RunEvent,
   type RunResult,
   type Task,
-} from 'agent-engine'
-import { fakeModel } from 'agent-engine/testing'
+} from '@talor/agent-engine'
+import { fakeModel } from '@talor/agent-engine/testing'
 import { auditTrail } from './audit.ts'
 import { clientDossier } from './client-dossier.ts'
 import { legalOpinion } from './deliverable.ts'

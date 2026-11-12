@@ -1,8 +1,8 @@
 // 演示用的文书助理模型：不联网、每次结果一样。像真实模型一样只看请求里的对话：
 // 最后一条是工具结果就汇报，否则起草并发函。换成真实模型见 README。
 
-import type { Clock } from 'agent-engine'
-import { fakeModel } from 'agent-engine/testing'
+import type { Clock } from '@talor/agent-engine'
+import { fakeModel } from '@talor/agent-engine/testing'
 
 export function clerkModel(opts: { clock?: Clock; delayMs?: number } = {}) {
   return fakeModel({

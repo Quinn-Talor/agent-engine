@@ -11,7 +11,7 @@ import {
   type Deliverable,
   type Fallback,
   type ModelRef,
-} from 'agent-engine'
+} from '@talor/agent-engine'
 import { OpinionSchema, everyIssueCited } from './domain.ts'
 
 /**

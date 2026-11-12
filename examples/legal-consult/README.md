@@ -85,7 +85,7 @@ npx vitest run examples
 
 ```ts
 import { anthropic } from '@ai-sdk/anthropic'
-import { aiSdkProvider } from 'agent-engine/adapters/ai-sdk'
+import { aiSdkProvider } from '@talor/agent-engine/adapters/ai-sdk'
 
 const provider = aiSdkProvider({
   id: 'counsel',

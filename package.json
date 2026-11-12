@@ -1,9 +1,30 @@
 {
-  "name": "agent-engine",
-  "version": "0.0.0",
-  "private": true,
-  "description": "Agent engine: runs agents through a fixed, observable and replayable flow",
+  "name": "@talor/agent-engine",
+  "version": "0.1.0",
+  "description": "A TypeScript agent engine that runs every agent through one fixed, observable and replayable loop: tools, MCP, skills, sessions, guards, delivery checks and an event-sourced run log.",
+  "keywords": [
+    "agent",
+    "ai-agent",
+    "llm",
+    "agent-framework",
+    "react-agent",
+    "mcp",
+    "tool-calling",
+    "ai-sdk",
+    "event-sourcing",
+    "observability",
+    "typescript"
+  ],
+  "homepage": "https://github.com/Quinn-Talor/agent-engine#readme",
+  "bugs": {
+    "url": "https://github.com/Quinn-Talor/agent-engine/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Quinn-Talor/agent-engine.git"
+  },
   "license": "MIT",
+  "author": "Quinn",
   "type": "module",
   "engines": {
     "node": ">=22.0.0"
@@ -38,11 +59,18 @@
     "./adapters/mcp-http": {
       "types": "./dist/adapters/mcp-http/mcp-http.d.ts",
       "import": "./dist/adapters/mcp-http/mcp-http.js"
-    }
+    },
+    "./package.json": "./package.json"
   },
   "files": [
-    "dist"
+    "dist",
+    "!dist/**/*.map",
+    "README.zh-CN.md",
+    "CHANGELOG.md"
   ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "test": "vitest run",
     "coverage": "vitest run --coverage",
@@ -50,8 +78,11 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "build": "tsc -p tsconfig.build.json",
-    "demo:legal": "npm run build && node examples/legal-consult/main.ts"
+    "build": "npm run clean && tsc -p tsconfig.build.json",
+    "demo:legal": "npm run build && node examples/legal-consult/main.ts",
+    "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
+    "prepublishOnly": "npm run lint && npm run format:check && npm run typecheck && npm test",
+    "prepack": "npm run build"
   },
   "dependencies": {
     "zod": "^4.3.6"

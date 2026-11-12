@@ -1,36 +1,55 @@
-# agent
+# agent-engine
 
-agent-engine 是一个 TypeScript 库：应用定义 Agent、组装任务、在执行环境里启动运行，引擎按固定流程把运行可靠地跑完，返回结果和完整的运行日志。
+[![npm](https://img.shields.io/npm/v/@talor/agent-engine)](https://www.npmjs.com/package/@talor/agent-engine)
+[![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![node](https://img.shields.io/node/v/@talor/agent-engine)](package.json)
 
-**承载与使用归引擎，配置与选择归应用。** 引擎不负责用哪些 MCP 服务器、装哪些插件、给哪个 agent 什么能力，也不负责会话的产品层（会话 id、权限、列表）、界面、业务数据和 prompt 内容；会话的上下文（接续、窗口、跨轮压缩）归引擎。
+English | [简体中文](README.zh-CN.md)
 
-- 运行一定会结束：外部依赖和组件的失败有边界、有降级、可恢复。
-- 可预测、可重放：运行日志是唯一的事实来源，状态、trace、统计、复盘都从它推导。
-- 可扩展：流程固定，只开放各环节里的组件槽位；业务扩展不需要改引擎。
+agent-engine is a TypeScript library for running AI agents reliably. The application defines an agent, builds a task and starts a run in an environment; the engine drives the run through one fixed loop until it ends and returns the result together with a complete, append-only run log.
 
-完整设计见 [`docs/agent-engine-design.md`](docs/agent-engine-design.md)，落地方案见 [`docs/implementation-plan.md`](docs/implementation-plan.md)。
+**The engine hosts and runs; the application configures and chooses.** The engine does not decide which MCP servers, plugins or capabilities an agent gets, and it does not own the product side of conversations (session ids, access, lists), the UI, business data or prompt content. It does own a session's context: continuing a conversation, the next turn's window, compaction across turns and the ledger of side effects.
 
-## 安装
+- **Every run ends.** Budgets, guard thresholds, bounded retries and a single fallback delivery mean failures of models, tools and components are bounded, degraded and recoverable.
+- **Predictable and replayable.** The run log is the single source of truth. State, transcript, trace, statistics and retrospective are all projections of it, and runs can be replayed strictly or against new components.
+- **Extensible without forks.** The loop is fixed; every stage exposes component slots. Business logic plugs in without changing the engine.
 
-需要 Node.js 22 及以上。包尚未发布到 npm：在本仓库构建后，用 `npm link` 或本地路径依赖引入。
+## Features
+
+| Area                | What you get                                                                                                                                                          |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Loop                | Compose → reason → act (permissions, approvals, concurrent tools) → evaluate (observation → guard opinions → verdict) → deliver (output contract → checks → fallback) |
+| Capabilities        | Tools, MCP servers (stdio and Streamable HTTP), skills, subagents, planning, and intent tools (`ask_user`, `propose`, `report_blocked`)                               |
+| Claude Code plugins | Load a plugin's skills, agents, MCP config and hooks (`SessionStart`, `UserPromptSubmit`, `PreToolUse`, `Stop`, …)                                                    |
+| Sessions            | Multi-turn conversations with carry-over, cross-turn compaction, a side-effect ledger, branching and a window preview                                                 |
+| Multimodal input    | Images and files in task input and tool results, checked against the model's input modalities before a run starts                                                     |
+| Supervision         | Guards (roadblocks, failure streaks, no new information, silent progress, pressure) with hints and blocks, plus an optional model advisor                             |
+| Delivery            | Text or structured output, completion review against what was actually executed, grounding checks, fallback delivery                                                  |
+| Permissions         | Workspace sandbox, risk-based approval, approvers that answer now or later                                                                                            |
+| Frontend            | Stream a run to the AI SDK UI message protocol for `useChat`, with resumable SSE                                                                                      |
+| Observability       | OpenTelemetry and Langfuse exporters grouped by session; trace, retrospective and supervision statistics as projections                                               |
+| Persistence         | In-memory or SQLite run archive with content-addressed blobs, retention, pinning and session deletion                                                                 |
+| Testing             | Fake model, tool and MCP server, chaos injection, conformance suites for components, invariant assertions, replay                                                     |
+
+## Install
+
+Requires Node.js 22 or later. The package is ESM only.
 
 ```bash
-npm install
+npm install @talor/agent-engine zod
 ```
 
-```bash
-npm run build
-```
+The engine uses `zod` v4, and so do your schemas; one copy is installed when the major versions match. Everything else is an optional peer dependency, so install only what you use:
 
-引擎依赖 `zod` v4，应用定义 schema 时也用它：应用装的版本落在同一个大版本内时，npm 只装一份。其余外部库都是可选的 peer 依赖，用到哪个装哪个，应用和引擎共用同一份：
+| You want to                                                  | Install                                         | Import from                                                 |
+| ------------------------------------------------------------ | ----------------------------------------------- | ----------------------------------------------------------- |
+| Call models through the [Vercel AI SDK](https://ai-sdk.dev)  | `ai` and a provider such as `@ai-sdk/anthropic` | `aiSdkProvider` from `@talor/agent-engine/adapters/ai-sdk`  |
+| Keep runs in SQLite (otherwise an in-memory archive is used) | `better-sqlite3`                                | `sqliteArchive` from `@talor/agent-engine/adapters/sqlite`  |
+| Connect MCP servers                                          | `@modelcontextprotocol/sdk`                     | `mcpHost()` from the package root loads it on first connect |
 
-- 模型经 [Vercel AI SDK](https://ai-sdk.dev) 接入：安装 `ai` 和厂商包（例如 `@ai-sdk/anthropic`），从 `agent-engine/adapters/ai-sdk` 导入 `aiSdkProvider`。
-- 持久化的运行档案用 SQLite：安装 `better-sqlite3`，从 `agent-engine/adapters/sqlite` 导入 `sqliteArchive`；不装时引擎使用内存档案。
-- 接 MCP 服务器：安装 `@modelcontextprotocol/sdk`；包入口的 `mcpHost()` 第一次连接时才加载它。
+Entry points: `@talor/agent-engine` (application API, standard components, `createEngine`), `@talor/agent-engine/sdk` (core functions for component and adapter authors), `@talor/agent-engine/testing` (test kit), and the adapters above.
 
-包的子路径：`agent-engine`（应用 API、标准组件、`createEngine`）、`agent-engine/sdk`（实现组件或适配器时用的核心函数）、`agent-engine/testing`（测试工具），以及上面的适配器。
-
-## 快速开始
+## Quick start
 
 ```ts
 import { anthropic } from '@ai-sdk/anthropic'
@@ -43,11 +62,12 @@ import {
   modelHub,
   tools,
   type ToolDef,
-} from 'agent-engine'
-import { aiSdkProvider } from 'agent-engine/adapters/ai-sdk'
-import { sqliteArchive } from 'agent-engine/adapters/sqlite'
+} from '@talor/agent-engine'
+import { aiSdkProvider } from '@talor/agent-engine/adapters/ai-sdk'
+import { sqliteArchive } from '@talor/agent-engine/adapters/sqlite'
 
-// 1. 引擎：平台服务（模型库、运行档案……）。记忆、监督与交付默认使用标准组件（交付带完成审查）。
+// 1. Engine: platform services (models, run archive, …). Memory, supervision and
+//    delivery default to the standard components, including completion review.
 const provider = aiSdkProvider({
   id: 'anthropic',
   models: {
@@ -65,125 +85,199 @@ const engine = createEngine({
   },
 })
 
-// 2. 执行环境：组织的规矩。委托人联系得上时 ask_user、propose 可用。
+// 2. Environment: the rules every agent here follows. With a reachable principal,
+//    the agent may ask_user and propose.
 const interactive = engine.environment({ name: 'interactive', principal: { reachable: true } })
 
-// 3. Agent：谁来做——指令与能力。
+// 3. Agent: who does the work — instructions and capabilities.
 const weather: ToolDef = {
   name: 'weather',
-  description: '查询城市天气',
+  description: 'Look up the weather in a city',
   inputSchema: z.object({ city: z.string() }),
   execution: { effect: 'none' },
   async execute(input) {
     const { city } = input as { city: string }
-    return `${city}：晴，20 度`
+    return `${city}: sunny, 20°C`
   },
 }
 const assistant = defineAgent({
   id: 'assistant',
-  instructions: [{ role: 'system', parts: [{ type: 'text', text: '你是出行助手' }] }],
+  instructions: [
+    { role: 'system', parts: [{ type: 'text', text: 'You are a travel assistant.' }] },
+  ],
   capabilities: [intents(), tools([weather])],
 })
 
-// 4. 任务：这次做什么、做到什么程度。
+// 4. Task: what to do this time, and how far to go.
 const task = defineTask({
-  input: [{ role: 'user', parts: [{ type: 'text', text: '明天去东京要带伞吗？' }] }],
+  input: [
+    { role: 'user', parts: [{ type: 'text', text: 'Do I need an umbrella in Tokyo tomorrow?' }] },
+  ],
   budget: { maxSteps: 10, maxTotalMs: 120_000 },
 })
 
-// 5. 运行：订阅事件做投影，等待结果。
+// 5. Run: subscribe for live output, then await the result.
 const run = interactive.start(assistant, task)
 run.subscribe({
   onNotice: (n) => void (n.t === 'text_delta' && process.stdout.write(n.text)),
-  onEvent: (e) => void (e.t === 'tool_finished' && console.log(`\n[工具] ${e.callId}`)),
+  onEvent: (e) => void (e.t === 'tool_finished' && console.log(`\n[tool] ${e.callId}`)),
 })
 const result = await run.result
 console.log(result.status, result.code, result.text, result.intent)
 ```
 
-`result.status` 是运行的结局：`completed`（交付了结果）、`awaiting_input`（需要委托人回复）、`finalized`（没完成，给出了阶段性交付）、`stopped`、`failed`、`aborted`；`result.code` 说明原因，以意图工具结束时 `result.intent` 带着该调用的参数（例如 `ask_user` 的问题）。
+`result.status` is how the run ended: `completed` (delivered), `awaiting_input` (needs the principal's reply), `finalized` (not done, delivered what it had), `stopped`, `failed` or `aborted`. `result.code` says why; when the run ends on an intent tool, `result.intent` carries that call (for example the question of `ask_user`).
 
-### 多轮对话与接着做
+## Sessions
 
-多轮对话用会话：每一轮开始时给出会话 id，引擎从会话日志推导这一轮带入的前文（接续、跨轮压缩、副作用台账、上一轮的结局），应用只管会话 id 和界面（完整方案见 [docs/session-design.md](docs/session-design.md)）：
+Pass a session id on every turn. The engine derives the context each turn starts with from the session's log — continuation, compaction across turns, the ledger of side effects and how the previous turn ended — so the application only manages the id and the UI.
 
 ```ts
-const first = environment.start(agent, ask('公司拖欠我工资，能拿回多少？'), {
+const first = interactive.start(assistant, ask('My employer owes me three months of salary.'), {
   session: 'case-1024',
 })
-await first.result // awaiting_input：律师追问入职时间与月薪
+await first.result // awaiting_input: the agent asks when you started and your salary
 
-// 委托人的回答是会话的下一轮；任务不再给 history。
-const second = environment.start(agent, ask('2021 年入职，月薪 12000 元'), { session: 'case-1024' })
+// The principal's answer is the next turn; the task no longer carries history.
+const second = interactive.start(assistant, ask('Since 2021, 12,000 a month.'), {
+  session: 'case-1024',
+})
 
-// 编辑旧消息或重新生成：从指定的一轮分叉；continues: null 从头开始。
-environment.start(agent, ask('换个问法'), { session: 'case-1024', continues: first.runId })
+// Edit an earlier message or regenerate: branch from a given turn; continues: null starts over.
+interactive.start(assistant, ask('Let me rephrase.'), {
+  session: 'case-1024',
+  continues: first.runId,
+})
 
-await engine.previewWindow({ session: 'case-1024' }) // 下一轮会带入什么，不调用模型
-await engine.deleteSession('case-1024') // 整个会话（含子运行）一起删除
+await engine.previewWindow({ session: 'case-1024' }) // what the next turn would carry, no model call
+await engine.deleteSession('case-1024') // the whole session, child runs included
 ```
 
-同一会话一次只跑一轮，第二轮受理失败 `session_busy`（可重试）；运行中的追加用 `run.steer(text)`，运行结束后它返回 `false`。进程中断的轮在引擎启动时补齐结尾，下一轮照常接上：中断的轮带着一行结局说明，可能已执行的副作用在台账里。
+A session runs one turn at a time; a second turn is refused with `session_busy` (retryable). Use `run.steer(text)` to add guidance to a running turn and `run.abort()` to cancel it. A turn interrupted by a crash is closed when the engine starts again, and the next turn continues normally with the outcome noted and any possibly executed side effects in the ledger.
 
-运行中的引导用 `run.steer(text)`，取消用 `run.abort()`。要同时收到子运行的事件和通知（例如把整棵委托树导出到观测后端），订阅时传 `{ children: true }`，用回调的 `run.runId` 区分是哪次运行。
+## Streaming to a chat UI
 
-## 示例
-
-[`examples/legal-consult`](examples/legal-consult/README.md)：一家律所的劳动争议咨询平台，覆盖引擎的每一类组件，多数是自定义的，并带九个可运行的场景（`npm run demo:legal`）。
-
-## 核心概念
-
-| 对象                   | 职责                                                                               |
-| ---------------------- | ---------------------------------------------------------------------------------- |
-| 引擎 `Engine`          | 平台服务（模型库、能力宿主、运行档案、凭据库、时钟、准入）与运行机制（记忆、监督） |
-| 执行环境 `Environment` | 在这里工作的所有 agent 必须遵守的规矩：委托人、须知、权限、规定、强制验收、上限    |
-| Agent                  | 谁来做：指令、能力、默认交付物、模型偏好                                           |
-| 任务 `Task`            | 这次做什么：输入、history（不带会话时）、作业范围、交付物、约束条件、预算          |
-| 运行 `Run`             | 一次执行的全过程；日志只追加，是唯一的事实来源                                     |
-
-每一步按固定流程执行：**组装**视图 → **推理** → **行动**（权限、审批、并发执行工具）→ **评估**（观察 → 守卫意见 → 判定，继续时带上纠偏消息）→ **交付**（输出契约 → 验收 → 兜底）。事实、意见、裁决分开记录，每个裁决都能追溯到来源。
-
-## 组件与适配器
-
-组件填进流程里的槽位，都由应用选择：
-
-| 槽位       | 标准组件                                                                         |
-| ---------- | -------------------------------------------------------------------------------- |
-| 能力       | `tools`、`tool`、`bundle`、`intents`、`planning`、`skill`、`subagent`、`mcp`     |
-| 记忆       | `compactingMemory`                                                               |
-| 工具呈现   | `searchExposure`                                                                 |
-| 监督       | `standardGuards`、`roadblock`、`thresholdGuard`、`modelAdvisor`、`progressGuard` |
-| 交付       | `text`、`structured`、`standardFallback`                                         |
-| 验收       | `groundingCheck`、`completionReview`（`createEngine` 默认带完成审查）            |
-| 权限       | `workspaceSandbox`（内置敏感路径黑名单，配置只能追加）、`riskApproval`           |
-| 插件       | `parsePlugin`、`parseSkill`、`parseMcpConfig`、`adaptHooks`                      |
-| 复盘与观测 | `retrospect.brief`、`otelExporter`、`langfuseExporter`                           |
-
-适配器把外部依赖接到端口上：`aiSdkProvider`（模型，`agent-engine/adapters/ai-sdk`）、`sqliteArchive`（运行档案，`agent-engine/adapters/sqlite`）、`mcpHost`（MCP 连接池，按服务器配置走 stdio 或 Streamable HTTP）、`hookRunner`（hook 进程）、`consoleLogger`（诊断日志）。
-
-## 测试工具
-
-测试工具从 `agent-engine/testing` 导入，应用和组件作者可以直接使用：
-
-| 工具                                                         | 用途                                                                                                                 |
-| ------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------- |
-| `fakeModel`、`fakeTool`、`fakeMcpServer`、`FakeClock`        | 脚本化的模型、工具、MCP 服务器与可控时钟                                                                             |
-| `runToEnd(run)`                                              | 跑完一次运行，返回结果和收到的事件（`run_ended` 写不进去时事件里没有它）                                             |
-| `assertInvariants(events)`                                   | 断言运行日志满足不变量，违规时列出每一条                                                                             |
-| `replay(archive, runId, 'strict')`                           | 严格重放档案里的运行；传 `{ mode: 'regression', … }` 用新组件做回归重放                                              |
-| `chaos({ seed, rate, faults, clock })`                       | 包装模型提供方、运行档案、MCP 连接与 hook 执行，按种子注入故障；超时按 `clock` 计时                                  |
-| `conformance.guard / memory / exposure / check / permission` | 组件一致性测试集：确定性、只收窄、不破坏成对、返回值形状合法；守卫不能每个健康步都告知；记忆覆盖压缩触发线以上的样本 |
-| `archiveStoreContract(make)`                                 | 任何 `ArchiveStore` 实现都必须通过的契约测试                                                                         |
-
-一致性测试集与契约测试返回用例列表，交给你自己的测试框架：
+`runToUIMessageStreamResponse` turns a run into the AI SDK UI message stream that `useChat` consumes, as SSE with event ids so a reconnecting client can resume:
 
 ```ts
-import { conformance } from 'agent-engine/testing'
+import { runToUIMessageStreamResponse } from '@talor/agent-engine/adapters/ai-sdk'
+
+export async function POST(req: Request): Promise<Response> {
+  const { id, text } = (await req.json()) as { id: string; text: string }
+  const run = interactive.start(
+    assistant,
+    defineTask({ input: [{ role: 'user', parts: [{ type: 'text', text }] }] }),
+    { session: id },
+  )
+  return runToUIMessageStreamResponse(run, { archive })
+}
+```
+
+See [`examples/chat-endpoint`](examples/chat-endpoint/README.md) for resuming streams and approvals answered in the page.
+
+## Images and files
+
+Task input accepts image and file parts. Before a run starts, the engine checks them against the model's declared input modalities and refuses what the model cannot take.
+
+```ts
+const look = defineTask({
+  input: [
+    {
+      role: 'user',
+      parts: [
+        { type: 'text', text: 'What is wrong with this invoice?' },
+        { type: 'image', image: await readFile('invoice.png'), mediaType: 'image/png' },
+      ],
+    },
+  ],
+})
+```
+
+## Observability and evaluation
+
+Exporters are run subscribers; they only build data, and you supply `send`:
+
+```ts
+import { otelExporter } from '@talor/agent-engine'
+
+run.subscribe(otelExporter({ send: (spans) => collector.export(spans) }), { children: true })
+```
+
+A session turn is tagged with `gen_ai.conversation.id` in OpenTelemetry and `sessionId` in Langfuse, so platforms group turns by conversation. Failed delivery checks are marked (`agent.pass = false`, Langfuse level `WARNING`). Only metadata is exported, never prompt or reply content.
+
+Evaluating quality — judging, scoring, aggregating across runs, experiments — belongs to the application or your observability platform. The engine guarantees the facts are there: `retrospective(events)` gives the timeline (guard signals, interventions, approvals, model failures, compactions), model attempts and tool outcomes per step, every check verdict per delivery, side effects, usage and timing; `buildTrace(events)` gives the timing tree.
+
+## Core concepts
+
+| Object      | Responsibility                                                                                                                   |
+| ----------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| Engine      | Platform services (models, capability hosts, run archive, credentials, clock, admission) and run mechanics (memory, supervision) |
+| Environment | Rules every agent working here must follow: principal, notices, permissions, policies, required checks, limits                   |
+| Agent       | Who does the work: instructions, capabilities, default deliverable, model preference                                             |
+| Task        | What to do this time: input, history (without a session), scope, deliverable, constraints, budget                                |
+| Run         | One execution; its log is append-only and the single source of truth                                                             |
+
+Facts, opinions and verdicts are recorded separately, and every verdict can be traced to its source.
+
+## Components and adapters
+
+Components fill the slots of the loop; the application chooses them.
+
+| Slot                            | Standard components                                                                                |
+| ------------------------------- | -------------------------------------------------------------------------------------------------- |
+| Capabilities                    | `tools`, `tool`, `bundle`, `intents`, `planning`, `skill`, `subagent`, `mcp`                       |
+| Memory                          | `compactingMemory`                                                                                 |
+| Tool exposure                   | `searchExposure`                                                                                   |
+| Supervision                     | `standardGuards`, `roadblock`, `thresholdGuard`, `modelAdvisor`, `progressGuard`                   |
+| Delivery                        | `text`, `structured`, `standardFallback`                                                           |
+| Checks                          | `groundingCheck`, `completionReview` (on by default in `createEngine`)                             |
+| Permissions                     | `workspaceSandbox` (built-in sensitive-path deny list; configuration can only add), `riskApproval` |
+| Plugins                         | `parsePlugin`, `parseSkill`, `parseMcpConfig`, `adaptHooks`                                        |
+| Retrospective and observability | `retrospect.brief`, `otelExporter`, `langfuseExporter`                                             |
+
+Adapters connect external dependencies to ports: `aiSdkProvider` (models), `sqliteArchive` (run archive), `mcpHost` (MCP connection pool over stdio or Streamable HTTP), `hookRunner` (hook processes) and `consoleLogger` (diagnostics).
+
+## Test kit
+
+Import from `@talor/agent-engine/testing`:
+
+| Tool                                                         | Purpose                                                                                     |
+| ------------------------------------------------------------ | ------------------------------------------------------------------------------------------- |
+| `fakeModel`, `fakeTool`, `fakeMcpServer`, `FakeClock`        | Scripted model, tools, MCP server and a controllable clock                                  |
+| `runToEnd(run)`                                              | Run to the end; returns the result and the events received                                  |
+| `assertInvariants(events)`                                   | Assert the run log satisfies the engine's invariants, listing every violation               |
+| `replay(archive, runId, 'strict')`                           | Strictly replay an archived run; `{ mode: 'regression', … }` replays it with new components |
+| `chaos({ seed, rate, faults, clock })`                       | Wrap model providers, the archive, MCP connections and hooks to inject seeded faults        |
+| `conformance.guard / memory / exposure / check / permission` | Conformance suites for your components                                                      |
+| `archiveStoreContract(make)`                                 | Contract tests every `ArchiveStore` implementation must pass                                |
+
+Suites return test cases for your own test runner:
+
+```ts
+import { conformance } from '@talor/agent-engine/testing'
 
 for (const c of conformance.memory(myMemory)) it(c.name, () => c.run())
 ```
 
-## 开发
+## Examples
+
+- [`examples/legal-consult`](examples/legal-consult/README.md): a law firm's labour-dispute consultation platform that uses every kind of component, mostly custom, with nine runnable scenarios (`npm run demo:legal`).
+- [`examples/chat-endpoint`](examples/chat-endpoint/README.md): a chat endpoint for `useChat` with resumable streams and approvals.
+
+## Documentation
+
+The design documents are written in Chinese:
+
+- [`docs/agent-engine-design.md`](docs/agent-engine-design.md): the full design (objects, loop, extension architecture, run log, invariants, standard library)
+- [`docs/session-design.md`](docs/session-design.md): sessions
+- [`docs/guard-mechanism.md`](docs/guard-mechanism.md): guards
+- [`docs/feature-catalog.md`](docs/feature-catalog.md): features, where they live and how they are tested
+
+## Development
+
+```bash
+npm install
+```
 
 ```bash
 npm test
@@ -198,15 +292,11 @@ npm run lint
 ```
 
 ```bash
-npm run coverage
-```
-
-```bash
 npm run build
 ```
 
-依赖方向（`contracts → core → executor / services → engine → api.ts`，`stdlib`、`testing`、`adapters` 只经公开 API 取用引擎能力）由 `eslint.config.js` 强制。工程规范见 [`vibe/project/`](vibe/project/)。
+The dependency direction (`contracts → core → executor / services → engine → api.ts`; `stdlib`, `testing` and `adapters` use the engine only through its public API) is enforced by `eslint.config.js`. See [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request.
 
-## 许可证
+## License
 
 [MIT](LICENSE)

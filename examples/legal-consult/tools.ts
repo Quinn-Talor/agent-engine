@@ -1,7 +1,7 @@
 // 业务工具：法规检索、经济补偿计算、发律师函。工具只管做事；能不能做、要不要审批由执行环境的权限决定。
 
 import { z } from 'zod'
-import { toolError, type ToolDef } from 'agent-engine'
+import { toolError, type ToolDef } from '@talor/agent-engine'
 import { STATUTES, citationOf } from './domain.ts'
 
 /** 法规检索：只读，没有副作用。 */

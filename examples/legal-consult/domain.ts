@@ -2,7 +2,7 @@
 // 示例数据：条文为节选，案情虚构，仅用于演示，不构成法律意见。
 
 import { z } from 'zod'
-import type { DomainValidate } from 'agent-engine'
+import type { DomainValidate } from '@talor/agent-engine'
 
 // ── 法规库 ─────────────────────────────────────────────────────────
 

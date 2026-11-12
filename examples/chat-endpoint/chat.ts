@@ -19,8 +19,11 @@ import {
   type PermissionRule,
   type Run,
   type ToolDef,
-} from 'agent-engine'
-import { runToUIMessageStreamResponse, type RunUIMessage } from 'agent-engine/adapters/ai-sdk'
+} from '@talor/agent-engine'
+import {
+  runToUIMessageStreamResponse,
+  type RunUIMessage,
+} from '@talor/agent-engine/adapters/ai-sdk'
 
 const instructions = [
   { role: 'system' as const, parts: [{ type: 'text' as const, text: '你是律所的文书助理。' }] },

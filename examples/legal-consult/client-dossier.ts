@@ -6,7 +6,7 @@
 import { readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { z } from 'zod'
-import type { Capability, Guard, ToolDef } from 'agent-engine'
+import type { Capability, Guard, ToolDef } from '@talor/agent-engine'
 import type { DossierStore } from './domain.ts'
 
 export function clientDossier(store: DossierStore): Capability {

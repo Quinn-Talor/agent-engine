@@ -2,8 +2,8 @@
 
 import { isToolUIPart, readUIMessageStream } from 'ai'
 import { describe, expect, it, vi } from 'vitest'
-import type { RunUIMessage, RunUIMessageChunk } from 'agent-engine/adapters/ai-sdk'
-import { FakeClock } from 'agent-engine/testing'
+import type { RunUIMessage, RunUIMessageChunk } from '@talor/agent-engine/adapters/ai-sdk'
+import { FakeClock } from '@talor/agent-engine/testing'
 import { createChatApp } from './chat.ts'
 import { clerkModel } from './clerk-model.ts'
 

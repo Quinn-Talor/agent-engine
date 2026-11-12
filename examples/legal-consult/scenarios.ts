@@ -1,6 +1,6 @@
 // 演示场景：每个场景是一次（或两次）真实的咨询运行，覆盖平台上的一组组件。
 
-import { text, type RunEvent, type RunResult } from 'agent-engine'
+import { text, type RunEvent, type RunResult } from '@talor/agent-engine'
 import { legalFallback } from './deliverable.ts'
 import { consultationTask, type LegalPlatform } from './platform.ts'
 

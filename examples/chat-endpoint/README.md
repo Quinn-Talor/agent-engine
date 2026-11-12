@@ -38,7 +38,7 @@ npx vitest run examples/chat-endpoint
 ```tsx
 import { useChat } from '@ai-sdk/react'
 import { DefaultChatTransport, lastAssistantMessageIsCompleteWithApprovalResponses } from 'ai'
-import type { RunUIMessage } from 'agent-engine/adapters/ai-sdk'
+import type { RunUIMessage } from '@talor/agent-engine/adapters/ai-sdk'
 
 const { messages, sendMessage, addToolApprovalResponse } = useChat<RunUIMessage>({
   id: chatId,
@@ -59,7 +59,7 @@ const { messages, sendMessage, addToolApprovalResponse } = useChat<RunUIMessage>
 
 ```ts
 import { anthropic } from '@ai-sdk/anthropic'
-import { aiSdkProvider } from 'agent-engine/adapters/ai-sdk'
+import { aiSdkProvider } from '@talor/agent-engine/adapters/ai-sdk'
 
 const provider = aiSdkProvider({
   id: 'firm',
