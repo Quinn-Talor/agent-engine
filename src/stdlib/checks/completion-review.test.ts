@@ -100,6 +100,44 @@ describe('riskScore', () => {
     ).toBe(4)
   })
 
+  it.each([
+    ['订单 O1 已为您退款。'],
+    ['已经帮您修改了收货地址。'],
+    ['已给您提交退款申请，请耐心等待审核结果。'],
+    ['已替您取消订单 O2。'],
+    ['已成功为您全额退款 459 元。'],
+    ['已将订单 O1 的地址修改为上海。'],
+    ['已为您发起退款，预计 3 个工作日到账。'],
+    ['亲，已经为您退款了呢~'],
+    ['订单 O1 已为您退款，还有其他需要帮忙的吗？'],
+    ['报告已上传到 https://x.example/r?id=1 。'],
+    ['Your order O1 has been refunded.'],
+    ['Sorry for the wait, I have cancelled order O2.'],
+  ])('scores a claim of an executed action: %s', (text) => {
+    expect(riskScore(candidate(text), corpus(input('谢谢')))).toBe(4)
+  })
+
+  it.each([
+    ['订单 O1 还没有退款。'],
+    ['抱歉，订单 O1 未能退款。'],
+    ['审批没有通过，无法退款。'],
+    ['订单已经无法办理退款。'],
+    ['这个订单已经取消不了了。'],
+    ['订单已超过可退款时间。'],
+    ['已收到您的退款申请，主管审批后会通知您。'],
+    ['系统没有显示已退款。'],
+    ['我无法确认是否已退款。'],
+    ['如果已经退款，通常 3 个工作日到账。'],
+    ['请问订单 O1 已经退款了吗？'],
+    ['您是想确认已为您退款的金额？'],
+    ['Order O1 has not been refunded.'],
+    ["The order couldn't be cancelled."],
+    ['Has the refund been paid?'],
+    ['If the file was saved, it is in the downloads folder.'],
+  ])('does not score a negation, question or condition: %s', (text) => {
+    expect(riskScore(candidate(text), corpus(input('谢谢')))).toBe(0)
+  })
+
   it('does not count a write claim backed by a successful side effect', () => {
     const c = corpus(input('看看'), tool({ effect: 'side_effect' }))
     expect(riskScore(candidate('已保存到文件'), c)).toBe(0)
@@ -205,7 +243,7 @@ describe('completionReview', () => {
   it('AC-022 identifies itself and defaults to gate with two attempts', () => {
     expect(completionReview()).toMatchObject({
       id: 'completion',
-      version: '5',
+      version: '6',
       mode: 'gate',
       maxAttempts: 2,
       config: { model: null },
