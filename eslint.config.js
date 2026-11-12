@@ -169,7 +169,8 @@ const boundaryConfigs = LAYER_RULES.flatMap(({ files, structural, external }) =>
 export default tseslint.config(
   // ── 忽略 ──────────────────────────────────────────────────────────
   {
-    ignores: ['node_modules/**', 'dist/**', 'coverage/**', 'vibe/**', 'docs/**'],
+    // .claude/：Claude Code 在仓库里建的 worktree，是另一份检出，不属于本项目的源码。
+    ignores: ['node_modules/**', 'dist/**', 'coverage/**', 'vibe/**', 'docs/**', '.claude/**'],
   },
 
   // ── 基础 TS 规则 ──────────────────────────────────────────────────
