@@ -58,8 +58,9 @@ npm run build
 
 1. Move the `Unreleased` entries in `CHANGELOG.md` under the new version.
 2. Bump `version` in `package.json` and `CLIENT_INFO.version` in `src/adapters/mcp-stdio/mcp-client.ts`.
-3. Commit, tag `vX.Y.Z` and push the tag.
-4. `npm publish` (runs lint, format check, typecheck and tests, then builds a clean `dist`).
+3. Update the tag in the install command of both READMEs.
+4. Commit, tag `vX.Y.Z` and push the tag. Installs from GitHub use the tag and build `dist` with the `prepare` script.
+5. Only if the package goes to the npm registry: `npm publish` (runs lint, format check, typecheck and tests, then builds a clean `dist`).
 
 ---
 
@@ -123,5 +124,6 @@ npm run build
 
 1. 把 `CHANGELOG.md` 里 `Unreleased` 的条目移到新版本下。
 2. 改 `package.json` 的 `version` 和 `src/adapters/mcp-stdio/mcp-client.ts` 里的 `CLIENT_INFO.version`。
-3. 提交，打标签 `vX.Y.Z` 并推送标签。
-4. `npm publish`（会先跑 lint、格式检查、类型检查和测试，再构建干净的 `dist`）。
+3. 更新两份 README 安装命令里的标签。
+4. 提交，打标签 `vX.Y.Z` 并推送标签。从 GitHub 安装时按标签取代码，由 `prepare` 脚本构建 `dist`。
+5. 只有发布到 npm 仓库时才需要：`npm publish`（会先跑 lint、格式检查、类型检查和测试，再构建干净的 `dist`）。

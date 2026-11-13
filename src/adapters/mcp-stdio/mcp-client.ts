@@ -5,7 +5,7 @@ import type { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { ToolListChangedNotificationSchema } from '@modelcontextprotocol/sdk/types.js'
 import type { JsonSchema, McpCallResult, McpConnection, McpToolInfo } from '../../sdk.js'
 
-export const CLIENT_INFO = { name: 'agent-engine', version: '0.1.0' }
+export const CLIENT_INFO = { name: 'agent-engine', version: '0.1.1' }
 
 type ListedTool = Awaited<ReturnType<Client['listTools']>>['tools'][number]
 

@@ -1,6 +1,6 @@
 {
   "name": "@talor/agent-engine",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "A TypeScript agent engine that runs every agent through one fixed, observable and replayable loop: tools, MCP, skills, sessions, guards, delivery checks and an event-sourced run log.",
   "keywords": [
     "agent",
@@ -82,7 +82,7 @@
     "demo:legal": "npm run build && node examples/legal-consult/main.ts",
     "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
     "prepublishOnly": "npm run lint && npm run format:check && npm run typecheck && npm test",
-    "prepack": "npm run build"
+    "prepare": "npm run build"
   },
   "dependencies": {
     "zod": "^4.3.6"

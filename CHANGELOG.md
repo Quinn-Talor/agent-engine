@@ -4,6 +4,16 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+## 0.1.1 - 2026-11-13
+
+### Fixed
+
+- Installing from GitHub (`npm install github:Quinn-Talor/agent-engine#v0.1.1`) now builds `dist`. The build runs in `prepare` instead of `prepack`, which npm does not run for git dependencies.
+
+### Changed
+
+- The READMEs describe installing from a GitHub tag or a local checkout; the package is not on the npm registry.
+
 ## 0.1.0 - 2026-11-12
 
 First public release.
@@ -28,6 +38,11 @@ First public release.
 # 更新日志
 
 格式参照 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。1.0 之前，次版本号可能改变公开 API。
+
+## 0.1.1 - 2026-11-13
+
+- 修复：从 GitHub 安装（`npm install github:Quinn-Talor/agent-engine#v0.1.1`）时会构建出 `dist`。构建改在 `prepare` 里执行；原来的 `prepack` 不会在安装 git 依赖时运行。
+- 文档：README 改为说明从 GitHub 标签或本地代码安装，包没有发布到 npm 仓库。
 
 ## 0.1.0 - 2026-11-12
 
