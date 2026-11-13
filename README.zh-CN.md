@@ -41,7 +41,13 @@ agent-engine 是一个 TypeScript 库，用来可靠地运行 AI agent：应用�
 npm install github:Quinn-Talor/agent-engine#v0.1.1 zod
 ```
 
-npm 会克隆这个标签，用包里的 `prepare` 脚本构建出 `dist`，所以第一次安装会慢一些。导入时用包名 `@talor/agent-engine`。npm 11 可能提示这个 `prepare` 脚本不在 `allowScripts` 里，构建照常执行。想直接用本地代码：先在那份代码里运行 `npm install`（会顺带构建 `dist`），再在你的项目里运行 `npm install <代码目录>`。
+npm 会克隆这个标签，用包里的 `prepare` 脚本构建出 `dist`，所以第一次安装会慢一些。导入时用包名 `@talor/agent-engine`。npm 11 可能提示这个 `prepare` 脚本不在 `allowScripts` 里，构建照常执行。想允许它、消掉提示，在你项目的 `package.json` 里加上这段（`npm approve-scripts` 不支持 git 依赖）：
+
+```json
+"allowScripts": { "github:Quinn-Talor/agent-engine": true }
+```
+
+想直接用本地代码：先在那份代码里运行 `npm install`（会顺带构建 `dist`），再在你的项目里运行 `npm install <代码目录>`。
 
 引擎依赖 `zod` v4，应用定义 schema 时也用它：大版本相同时 npm 只装一份。其余外部库都是可选的 peer 依赖，用到哪个装哪个：
 

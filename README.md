@@ -41,7 +41,13 @@ The package is not on the npm registry. Install it from a release tag on GitHub:
 npm install github:Quinn-Talor/agent-engine#v0.1.1 zod
 ```
 
-npm clones the tag and builds `dist` with the package's `prepare` script, so the first install takes a little longer. Imports use the package name, `@talor/agent-engine`. npm 11 may warn that this `prepare` script is not covered by `allowScripts`; the build still runs. To work against a local checkout instead, run `npm install` there (it builds `dist`) and then `npm install <path to the checkout>` in your project.
+npm clones the tag and builds `dist` with the package's `prepare` script, so the first install takes a little longer. Imports use the package name, `@talor/agent-engine`. npm 11 may warn that this `prepare` script is not covered by `allowScripts`; the build still runs. To allow it and silence the warning, add this to your project's `package.json` (`npm approve-scripts` does not handle git dependencies):
+
+```json
+"allowScripts": { "github:Quinn-Talor/agent-engine": true }
+```
+
+To work against a local checkout instead, run `npm install` there (it builds `dist`) and then `npm install <path to the checkout>` in your project.
 
 The engine uses `zod` v4, and so do your schemas; one copy is installed when the major versions match. Everything else is an optional peer dependency, so install only what you use:
 
